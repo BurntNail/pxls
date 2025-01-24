@@ -1,7 +1,45 @@
 use std::collections::HashMap;
 use image::{ColorType, DynamicImage, GenericImage, GenericImageView, Pixel, Rgba};
 use indicatif::ProgressBar;
-use crate::cli::DistanceAlgorithm;
+
+#[derive(Debug, Copy, Clone)]
+pub enum DistanceAlgorithm {
+    Euclidean,
+    Manhattan,
+}
+
+impl DistanceAlgorithm {
+    pub fn distance(&self, a: &Rgba<u8>, b: &Rgba<u8>) -> u32 {
+        #[inline]
+        fn euclidean_distance(
+            Rgba([r, g, b, _]): &Rgba<u8>,
+            Rgba([cmp_r, cmp_g, cmp_b, _]): &Rgba<u8>,
+        ) -> u32 {
+            let delta_r = r.abs_diff(*cmp_r);
+            let delta_g = g.abs_diff(*cmp_g);
+            let delta_b = b.abs_diff(*cmp_b);
+
+            (delta_r as u32).pow(2) + (delta_g as u32).pow(2) + (delta_b as u32).pow(2)
+        }
+
+        #[inline]
+        fn manhattan_distance(
+            Rgba([r, g, b, _]): &Rgba<u8>,
+            Rgba([cmp_r, cmp_g, cmp_b, _]): &Rgba<u8>,
+        ) -> u32 {
+            let delta_r = r.abs_diff(*cmp_r);
+            let delta_g = g.abs_diff(*cmp_g);
+            let delta_b = b.abs_diff(*cmp_b);
+
+            delta_r as u32 + delta_g as u32 + delta_b as u32
+        }
+
+        match self {
+            Self::Euclidean => euclidean_distance(a, b),
+            Self::Manhattan => manhattan_distance(a, b),
+        }
+    }
+}
 
 pub fn get_palette(
     image: &DynamicImage,

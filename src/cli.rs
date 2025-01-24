@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use std::process::Command;
 use dialoguer::{FuzzySelect, Input};
 use dialoguer::theme::ColorfulTheme;
-use image::{ImageReader, Rgba};
-use crate::logic::{dither_palette, get_palette};
+use image::ImageReader;
+use crate::logic::{dither_palette, get_palette, DistanceAlgorithm};
 
+#[allow(dead_code)]
 pub fn cli_main() -> anyhow::Result<()> {
     let CliArgs {
         input,
@@ -57,45 +58,6 @@ pub struct CliArgs {
     closeness_threshold: u32,
     output_px_size: u32,
     algorithm: DistanceAlgorithm,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum DistanceAlgorithm {
-    Euclidean,
-    Manhattan,
-}
-
-impl DistanceAlgorithm {
-    pub fn distance(&self, a: &Rgba<u8>, b: &Rgba<u8>) -> u32 {
-        #[inline]
-        fn euclidean_distance(
-            Rgba([r, g, b, _]): &Rgba<u8>,
-            Rgba([cmp_r, cmp_g, cmp_b, _]): &Rgba<u8>,
-        ) -> u32 {
-            let delta_r = r.abs_diff(*cmp_r);
-            let delta_g = g.abs_diff(*cmp_g);
-            let delta_b = b.abs_diff(*cmp_b);
-
-            (delta_r as u32).pow(2) + (delta_g as u32).pow(2) + (delta_b as u32).pow(2)
-        }
-
-        #[inline]
-        fn manhattan_distance(
-            Rgba([r, g, b, _]): &Rgba<u8>,
-            Rgba([cmp_r, cmp_g, cmp_b, _]): &Rgba<u8>,
-        ) -> u32 {
-            let delta_r = r.abs_diff(*cmp_r);
-            let delta_g = g.abs_diff(*cmp_g);
-            let delta_b = b.abs_diff(*cmp_b);
-
-            delta_r as u32 + delta_g as u32 + delta_b as u32
-        }
-
-        match self {
-            Self::Euclidean => euclidean_distance(a, b),
-            Self::Manhattan => manhattan_distance(a, b),
-        }
-    }
 }
 
 impl CliArgs {

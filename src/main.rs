@@ -1,11 +1,10 @@
-use crate::cli::cli_main;
+use crate::gui::gui_main;
 
 mod cli;
 mod logic;
+mod gui;
 
 fn main () {
-    if let Err(e) = cli_main() {
-        eprintln!("Error running CLI Main: {e:?}");
-    }
+    gui_main();
 }
 
