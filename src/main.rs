@@ -18,6 +18,8 @@ fn main() -> anyhow::Result<()> {
 
     convert_to_palette(&image, &av_px_colours, euclidean_distance)?;
     convert_to_palette(&image, &av_px_colours, manhattan_distance)?;
+    convert_to_palette(&image, &av_px_colours, sum_diff)?;
+    convert_to_palette(&image, &av_px_colours, prod_diff)?;
 
     Ok(())
 }
@@ -79,7 +81,6 @@ fn convert_to_palette (input: &DynamicImage, palette: &[Rgb<u8>], dist_func: imp
 }
 
 #[inline]
-#[allow(dead_code)]
 fn euclidean_distance(Rgb([r, g, b]): &Rgb<u8>, Rgb([cmp_r, cmp_g, cmp_b]): &Rgb<u8>) -> u32 {
     let delta_r = r.max(cmp_r) - r.min(cmp_r);
     let delta_g = g.max(cmp_g) - g.min(cmp_g);
@@ -89,11 +90,26 @@ fn euclidean_distance(Rgb([r, g, b]): &Rgb<u8>, Rgb([cmp_r, cmp_g, cmp_b]): &Rgb
 }
 
 #[inline]
-#[allow(dead_code)]
 fn manhattan_distance(Rgb([r, g, b]): &Rgb<u8>, Rgb([cmp_r, cmp_g, cmp_b]): &Rgb<u8>) -> u32 {
     let delta_r = r.max(cmp_r) - r.min(cmp_r);
     let delta_g = g.max(cmp_g) - g.min(cmp_g);
     let delta_b = b.max(cmp_b) - b.min(cmp_b);
 
     delta_r as u32 + delta_g as u32 + delta_b as u32
+}
+
+#[inline]
+fn sum_diff(Rgb([r, g, b]): &Rgb<u8>, Rgb([cmp_r, cmp_g, cmp_b]): &Rgb<u8>) -> u32 {
+    let a = *r as u32 + *g as u32 + *b as u32;
+    let b = *cmp_r as u32 + *cmp_g as u32 + *cmp_b as u32;
+
+    a.max(b) - a.min(b)
+}
+
+#[inline]
+fn prod_diff(Rgb([r, g, b]): &Rgb<u8>, Rgb([cmp_r, cmp_g, cmp_b]): &Rgb<u8>) -> u32 {
+    let a = *r as u32 * *g as u32 * *b as u32;
+    let b = *cmp_r as u32 * *cmp_g as u32 * *cmp_b as u32;
+
+    a.max(b) - a.min(b)
 }
