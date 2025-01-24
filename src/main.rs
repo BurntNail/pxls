@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 use dialoguer::{FuzzySelect, Input};
 use dialoguer::theme::ColorfulTheme;
 use image::{ColorType, DynamicImage, GenericImage, GenericImageView, ImageReader, Pixel, Rgb};
+use indicatif::{MultiProgress, ProgressBar};
 
 struct Args {
     input: PathBuf,
@@ -81,15 +83,15 @@ impl Args {
 
             current_dir_files.swap_remove(chosen)
         };
-        let output: String = Input::with_theme(&theme).with_prompt("What should the output file be?").interact()?;
         let chunks_per_dimension = Input::with_theme(&theme).with_prompt("How many chunks per dimension should be used for palette generation?").interact()?;
         let closeness_threshold = Input::with_theme(&theme).with_prompt("What should the closeness threshold be for palette generation?").interact()?;
-        let output_px_size = Input::with_theme(&theme).with_prompt("What should the virtual pixel size be for the output?").interact()?;
         let algorithm = if FuzzySelect::with_theme(&theme).with_prompt("Which distance algorithm should be used?").items(&["Manhattan (faster)", "Euclidean (more precise)"]).interact()? == 0 {
             DistanceAlgorithm::Manhattan
         } else {
             DistanceAlgorithm::Euclidean
         };
+        let output: String = Input::with_theme(&theme).with_prompt("What should the output file be?").interact()?;
+        let output_px_size = Input::with_theme(&theme).with_prompt("What should the virtual pixel size be for the output?").interact()?;
 
         Ok(Self {
             input,
@@ -115,7 +117,12 @@ fn main() -> anyhow::Result<()> {
     let output_img = convert_to_palette(&image, &av_px_colours, algorithm, output_px_size);
     println!("Output image generated");
 
-    output_img.save(output)?;
+    output_img.save(&output)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open").arg(output).spawn()?;
+    }
 
     Ok(())
 }
@@ -123,9 +130,12 @@ fn main() -> anyhow::Result<()> {
 
 fn get_palette(image: &DynamicImage, chunks_per_dimension: u32, closeness_threshold: u32, dist_algo: DistanceAlgorithm) -> Vec<Rgb<u8>> {
     let (width, height) = image.dimensions();
+    let chunks_per_dimension = chunks_per_dimension.min(width).min(height);
     let (width_chunk_size, height_chunk_size) = (width / chunks_per_dimension, height / chunks_per_dimension);
 
-    let mut av_px_colours = Vec::with_capacity((chunks_per_dimension * chunks_per_dimension) as usize);
+    let max_num_colours = chunks_per_dimension * chunks_per_dimension;
+    let progress_bar = ProgressBar::new(max_num_colours as u64);
+    let mut av_px_colours = Vec::with_capacity(max_num_colours as usize);
     for chunk_x in 0..chunks_per_dimension {
         for chunk_y in 0..chunks_per_dimension {
 
@@ -151,6 +161,8 @@ fn get_palette(image: &DynamicImage, chunks_per_dimension: u32, closeness_thresh
             if let Some((most_common, _)) = map.into_iter().max_by_key(|(_, count)| *count) {
                 av_px_colours.push(most_common);
             }
+
+            progress_bar.inc(1);
         }
     }
 
@@ -162,6 +174,8 @@ fn convert_to_palette (input: &DynamicImage, palette: &[Rgb<u8>], distance_algor
 
     let (num_width_chunks, num_height_chunks) = (width / scaling_factor, height / scaling_factor);
     let mut output = DynamicImage::new(width, height, ColorType::Rgb8);
+
+    let chunks_progress_bar = ProgressBar::new((num_width_chunks * num_height_chunks) as u64);
 
     for chunk_x in 0..num_width_chunks {
         for chunk_y in 0..num_height_chunks {
@@ -189,6 +203,7 @@ fn convert_to_palette (input: &DynamicImage, palette: &[Rgb<u8>], distance_algor
                 }
             }
 
+            chunks_progress_bar.inc(1);
         }
     }
 

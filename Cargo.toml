@@ -1,5 +1,5 @@
 [package]
-name = "pxl"
+name = "pxls"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = "1.0.95"
 dialoguer = { version = "0.11.0", features = ["fuzzy-select"] }
 image = "0.25.5"
+indicatif = "0.17.9"
 
-[profile.release]
-debug = true
+# [profile.release]
+# debug = true
