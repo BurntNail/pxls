@@ -324,16 +324,20 @@ fn dither_palette(
 
             for px_x in (output_px_size * chunk_x)..(output_px_size * (chunk_x + 1)) {
                 for px_y in (output_px_size * chunk_y)..(output_px_size * (chunk_y + 1)) {
-                    let mut should_dither = (px_y % (output_px_size / 2)) < (output_px_size / 4);
-
-                    if (px_x % (output_px_size / 2)) < (output_px_size / 4) {
-                        should_dither = !should_dither;
-                    }
-
-                    if should_dither {
+                    if output_px_size == 1 {
                         output.put_pixel(px_x, px_y, first);
-                    }  else {
-                        output.put_pixel(px_x, px_y, second);
+                    } else {
+                        let mut should_dither = (px_y % (output_px_size / 2)) < (output_px_size / 4);
+
+                        if (px_x % (output_px_size / 2)) < (output_px_size / 4) {
+                            should_dither = !should_dither;
+                        }
+
+                        if should_dither {
+                            output.put_pixel(px_x, px_y, first);
+                        }  else {
+                            output.put_pixel(px_x, px_y, second);
+                        }
                     }
                 }
             }
