@@ -101,22 +101,43 @@ impl Default for OutputSettings {
     }
 }
 
+#[derive(Clone, Debug)]
+struct SettingsBuffers {
+    chunks_per_dimension: String,
+    closeness_threshold: String,
+    output_px_size: String,
+}
+
 
 struct PxlsApp {
     current: Option<PhotoBeingEdited>,
     distance_algorithm: DistanceAlgorithm,
     palette_settings: PaletteSettings,
-    output_settings: OutputSettings
+    output_settings: OutputSettings,
+    setting_change_buffers: SettingsBuffers,
+    needs_to_refresh_palette: bool,
+    needs_to_refresh_output: bool,
 }
 
 impl PxlsApp {
     pub fn new (cc: &CreationContext<'_>) -> Self {
         install_image_loaders(&cc.egui_ctx);
+
+        let palette_settings = PaletteSettings::default();
+        let output_settings = OutputSettings::default();
+
         Self {
             current: None,
             distance_algorithm: DistanceAlgorithm::Euclidean,
-            palette_settings: PaletteSettings::default(),
-            output_settings: OutputSettings::default()
+            palette_settings,
+            output_settings,
+            setting_change_buffers: SettingsBuffers {
+                chunks_per_dimension: palette_settings.chunks_per_dimension.to_string(),
+                closeness_threshold: palette_settings.closeness_threshold.to_string(),
+                output_px_size: output_settings.output_px_size.to_string()
+            },
+            needs_to_refresh_output: false,
+            needs_to_refresh_palette: false,
         }
     }
 }
@@ -140,17 +161,70 @@ impl eframe::App for PxlsApp {
                 }
 
                 ui.vertical(|ui| {
+                    ui.label("Distance Algorithm:");
+
                     let current = self.distance_algorithm;
                     for possibility in ALL_ALGOS {
                         ui.radio_value(&mut self.distance_algorithm, possibility, possibility.to_str());
                     }
 
                     if current != self.distance_algorithm {
-                        if let Some(current) = self.current.as_mut() {
-                            current.change_palette_settings_or_algo(self.palette_settings, self.output_settings, self.distance_algorithm, ctx);
-                        }
+                        self.needs_to_refresh_palette = true;
                     }
                 });
+
+                ui.separator();
+
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Chunks per Dimension: ");
+                        ui.text_edit_singleline(&mut self.setting_change_buffers.chunks_per_dimension);
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Closeness Threshold: ");
+                        ui.text_edit_singleline(&mut self.setting_change_buffers.closeness_threshold);
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Virtual Pixel Size: ");
+                        ui.text_edit_singleline(&mut self.setting_change_buffers.output_px_size);
+                    });
+                });
+
+
+                if let Ok(new_chunks_per_dimension) = self.setting_change_buffers.chunks_per_dimension.parse() {
+                    if new_chunks_per_dimension != self.palette_settings.chunks_per_dimension {
+                        self.needs_to_refresh_palette = true;
+                        self.palette_settings.chunks_per_dimension = new_chunks_per_dimension;
+                    }
+                }
+                if let Ok(new_closeness_threshold) = self.setting_change_buffers.closeness_threshold.parse() {
+                    if new_closeness_threshold != self.palette_settings.closeness_threshold {
+                        self.needs_to_refresh_palette = true;
+                        self.palette_settings.closeness_threshold = new_closeness_threshold;
+                    }
+                }
+                if let Ok(new_output_px_size) = self.setting_change_buffers.output_px_size.parse() {
+                    if new_output_px_size != self.output_settings.output_px_size {
+                        self.needs_to_refresh_output = true;
+                        self.output_settings.output_px_size = new_output_px_size;
+                    }
+                }
+
+                if self.needs_to_refresh_palette || self.needs_to_refresh_output {
+                    if let Some(current) = self.current.as_mut() {
+                        ui.separator();
+                        if ui.button("Update").clicked() {
+                            if self.needs_to_refresh_palette {
+                                current.change_palette_settings_or_algo(self.palette_settings, self.output_settings, self.distance_algorithm, ctx);
+                            } else if self.needs_to_refresh_output {
+                                current.change_output_settings(self.output_settings, self.distance_algorithm, ctx);
+                            }
+
+                            self.needs_to_refresh_palette = false;
+                            self.needs_to_refresh_output = false;
+                        }
+                    }
+                }
             });
         });
 
@@ -171,7 +245,7 @@ impl eframe::App for PxlsApp {
                     (available_aspect / img_aspect, 1.0)
                 } else {
                     (1.0, img_aspect / available_aspect)
-                };
+                }; //TODO: now that we've got this fun scaling, the image doesn't need to be weirdly big
 
 
                 let uv = Rect{ min:pos2(0.0, 0.0), max:pos2(uv_x, uv_y)};
