@@ -1,11 +1,11 @@
+use crate::logic::{dither_palette, get_palette, DistanceAlgorithm};
+use anyhow::anyhow;
+use dialoguer::theme::ColorfulTheme;
+use dialoguer::{FuzzySelect, Input};
+use image::ImageReader;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use anyhow::anyhow;
-use dialoguer::{FuzzySelect, Input};
-use dialoguer::theme::ColorfulTheme;
-use image::ImageReader;
-use crate::logic::{dither_palette, get_palette, DistanceAlgorithm};
 
 #[allow(dead_code)]
 pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
@@ -16,31 +16,23 @@ pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
         closeness_threshold,
         output_px_size,
         algorithm,
-        dithering_factor
+        dithering_factor,
     } = CliArgs::parse(should_ask)?;
 
     let image = ImageReader::open(input)?.decode()?;
     println!("Image read in");
 
-    //tyvm https://stackoverflow.com/questions/26885198/find-closest-factor-to-a-number-of-a-number
-    let get_closest_factor = |target, number| {
-        for i in 0..number {
-            if number % (target + i) == 0 {
-                return target + i;
-            } else if number % (target - i) == 0 {
-                return target - i;
-            }
-        }
-        return number;
-    };
-
-    let output_px_size = get_closest_factor(image.width(), output_px_size);
-
     println!("Generating palette");
     let av_px_colours = get_palette(&image, chunks_per_dimension, closeness_threshold, algorithm);
     println!("Palette generated with {} colours", av_px_colours.len());
     println!("Converting image to palette & shrinking");
-    let output_img = dither_palette(&image, &av_px_colours, algorithm, output_px_size, dithering_factor);
+    let output_img = dither_palette(
+        &image,
+        &av_px_colours,
+        algorithm,
+        output_px_size,
+        dithering_factor,
+    );
     println!("Output image generated");
 
     output_img.save(&output)?;
@@ -68,7 +60,7 @@ impl CliArgs {
         if should_use_asking {
             Self::parse_manual()
         } else {
-            Self::parse_env().ok_or(anyhow!("unable to parse from args"))
+            Self::parse_env().ok_or_else(|| anyhow!("unable to parse from args"))
         }
     }
 
@@ -117,12 +109,12 @@ impl CliArgs {
 
         Some(Self {
             input,
+            output,
             chunks_per_dimension,
             closeness_threshold,
-            algorithm,
-            output,
             output_px_size,
-            dithering_factor
+            algorithm,
+            dithering_factor,
         })
     }
 
@@ -181,7 +173,7 @@ impl CliArgs {
             closeness_threshold,
             output_px_size,
             algorithm,
-            dithering_factor
+            dithering_factor,
         })
     }
 }

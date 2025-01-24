@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
 use image::{ColorType, DynamicImage, GenericImage, GenericImageView, Pixel, Rgba};
 use indicatif::ProgressBar;
+use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum DistanceAlgorithm {
@@ -10,7 +10,7 @@ pub enum DistanceAlgorithm {
 }
 
 impl DistanceAlgorithm {
-    pub const fn to_str (self) -> &'static str {
+    pub const fn to_str(self) -> &'static str {
         match self {
             Self::Euclidean => "Euclidean",
             Self::Manhattan => "Manhattan",
@@ -24,30 +24,31 @@ impl Display for DistanceAlgorithm {
     }
 }
 
-pub const ALL_ALGOS: [DistanceAlgorithm; 2] = [DistanceAlgorithm::Euclidean, DistanceAlgorithm::Manhattan];
+pub const ALL_ALGOS: [DistanceAlgorithm; 2] =
+    [DistanceAlgorithm::Euclidean, DistanceAlgorithm::Manhattan];
 
 impl DistanceAlgorithm {
-    pub fn distance(&self, a: &Rgba<u8>, b: &Rgba<u8>) -> u32 {
+    pub const fn distance(self, a: Rgba<u8>, b: Rgba<u8>) -> u32 {
         #[inline]
-        fn euclidean_distance(
-            Rgba([r, g, b, _]): &Rgba<u8>,
-            Rgba([cmp_r, cmp_g, cmp_b, _]): &Rgba<u8>,
+        const fn euclidean_distance(
+            Rgba([r, g, b, _]): Rgba<u8>,
+            Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
         ) -> u32 {
-            let delta_r = r.abs_diff(*cmp_r);
-            let delta_g = g.abs_diff(*cmp_g);
-            let delta_b = b.abs_diff(*cmp_b);
+            let delta_r = r.abs_diff(cmp_r);
+            let delta_g = g.abs_diff(cmp_g);
+            let delta_b = b.abs_diff(cmp_b);
 
             (delta_r as u32).pow(2) + (delta_g as u32).pow(2) + (delta_b as u32).pow(2)
         }
 
         #[inline]
-        fn manhattan_distance(
-            Rgba([r, g, b, _]): &Rgba<u8>,
-            Rgba([cmp_r, cmp_g, cmp_b, _]): &Rgba<u8>,
+        const fn manhattan_distance(
+            Rgba([r, g, b, _]): Rgba<u8>,
+            Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
         ) -> u32 {
-            let delta_r = r.abs_diff(*cmp_r);
-            let delta_g = g.abs_diff(*cmp_g);
-            let delta_b = b.abs_diff(*cmp_b);
+            let delta_r = r.abs_diff(cmp_r);
+            let delta_g = g.abs_diff(cmp_g);
+            let delta_b = b.abs_diff(cmp_b);
 
             delta_r as u32 + delta_g as u32 + delta_b as u32
         }
@@ -59,12 +60,27 @@ impl DistanceAlgorithm {
     }
 }
 
+//tyvm https://stackoverflow.com/questions/26885198/find-closest-factor-to-a-number-of-a-number
+pub fn get_closest_factor(target: u32, number: u32) -> u32 {
+    for i in 0..number {
+        if number % (target + i) == 0 {
+            return target + i;
+        } else if number % (target - i) == 0 {
+            return target - i;
+        }
+    }
+    number
+}
+
 pub fn get_palette(
     image: &DynamicImage,
     chunks_per_dimension: u32,
     closeness_threshold: u32,
     dist_algo: DistanceAlgorithm,
 ) -> Vec<Rgba<u8>> {
+    let chunks_per_dimension = get_closest_factor(image.width(), chunks_per_dimension);
+    let closeness_threshold = get_closest_factor(image.width(), closeness_threshold);
+
     let (width, height) = image.dimensions();
     let chunks_per_dimension = chunks_per_dimension.min(width).min(height);
     let (width_chunk_size, height_chunk_size) =
@@ -81,8 +97,8 @@ pub fn get_palette(
                     let px = image.get_pixel(px_x, px_y);
 
                     let mut too_close = false;
-                    for so_far in &av_px_colours {
-                        if dist_algo.distance(&px, so_far) < closeness_threshold {
+                    for so_far in av_px_colours.iter().copied() {
+                        if dist_algo.distance(px, so_far) < closeness_threshold {
                             too_close = true;
                             break;
                         }
@@ -105,7 +121,6 @@ pub fn get_palette(
     av_px_colours
 }
 
-
 pub fn dither_palette(
     input: &DynamicImage,
     palette: &[Rgba<u8>],
@@ -113,6 +128,8 @@ pub fn dither_palette(
     output_px_size: u32,
     dithering_factor: u32,
 ) -> DynamicImage {
+    let output_px_size = get_closest_factor(input.width(), output_px_size);
+
     let (width, height) = input.dimensions();
 
     let (num_width_chunks, num_height_chunks) = (width / output_px_size, height / output_px_size);
@@ -139,10 +156,14 @@ pub fn dither_palette(
                 (accum_r / divisor) as u8,
                 (accum_g / divisor) as u8,
                 (accum_b / divisor) as u8,
-                u8::MAX
+                u8::MAX,
             ]);
 
-            let distances: HashMap<_, _> = palette.iter().cloned().map(|x| (x, distance_algorithm.distance(&x, &av_px))).collect();
+            let distances: HashMap<_, _> = palette
+                .iter()
+                .copied()
+                .map(|x| (x, distance_algorithm.distance(x, av_px)))
+                .collect();
 
             let mut cloned_palette = palette.to_vec();
             cloned_palette.sort_by_key(|rgb| distances[rgb]);
@@ -157,9 +178,11 @@ pub fn dither_palette(
                 let first_distance = distances[&first];
                 let second_distance = distances[&second];
 
-                let inter_candidate_distance = distance_algorithm.distance(&first, &second);
+                let inter_candidate_distance = distance_algorithm.distance(first, second);
 
-                if first_distance.abs_diff(second_distance) > (inter_candidate_distance / dithering_factor) {
+                if first_distance.abs_diff(second_distance)
+                    > (inter_candidate_distance / dithering_factor)
+                {
                     (first, first)
                 } else {
                     (first, second)
@@ -171,7 +194,8 @@ pub fn dither_palette(
                     if output_px_size == 1 {
                         output.put_pixel(px_x, px_y, first);
                     } else {
-                        let mut should_dither = (px_y % (output_px_size / 2)) < (output_px_size / 4);
+                        let mut should_dither =
+                            (px_y % (output_px_size / 2)) < (output_px_size / 4);
 
                         if (px_x % (output_px_size / 2)) < (output_px_size / 4) {
                             should_dither = !should_dither;
@@ -179,7 +203,7 @@ pub fn dither_palette(
 
                         if should_dither {
                             output.put_pixel(px_x, px_y, first);
-                        }  else {
+                        } else {
                             output.put_pixel(px_x, px_y, second);
                         }
                     }

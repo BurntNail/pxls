@@ -1,12 +1,20 @@
-use std::env::args;
+#![warn(clippy::all, clippy::pedantic, clippy::nursery)]
+#![allow(
+    clippy::cast_lossless,
+    clippy::cast_possible_truncation,
+    clippy::tuple_array_conversions,
+    clippy::cast_precision_loss
+)]
+
 use crate::cli::cli_main;
 use crate::gui::gui_main;
+use std::env::args;
 
 mod cli;
-mod logic;
 mod gui;
+mod logic;
 
-fn main () {
+fn main() {
     let args: Vec<String> = args().skip(1).collect();
     if args.is_empty() {
         gui_main();
@@ -26,6 +34,4 @@ fn main () {
             eprintln!("Error w/ CLI: {e:?}");
         }
     }
-
 }
-
