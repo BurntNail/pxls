@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use anyhow::bail;
 use image::{ColorType, DynamicImage, GenericImage, GenericImageView, ImageReader, Pixel, Rgb};
 
@@ -34,20 +35,22 @@ fn get_av_px_colours (image: &DynamicImage) -> Vec<Rgb<u8>> {
     for chunk_x in 0..LENGTH_SECTION_SIZE {
         println!("\tprocessing x chunk {}", chunk_x + 1);
         for chunk_y in 0..LENGTH_SECTION_SIZE {
-            let (mut accum_r, mut accum_g, mut accum_b) = (0, 0, 0);
 
+            let mut map: HashMap<_, u32> = HashMap::new();
             for px_x in (width_chunk_size * chunk_x)..(width_chunk_size * (chunk_x + 1)) {
                 for px_y in (height_chunk_size * chunk_y)..(height_chunk_size * (chunk_y + 1)) {
-                    let [r, g, b, _] = image.get_pixel(px_x, px_y).0;
-                    accum_r += r as u32;
-                    accum_g += g as u32;
-                    accum_b += b as u32;
+                    let px = image.get_pixel(px_x, px_y).to_rgb();
+                    const THRESHOLD: u32 = 100;
+                    let too_close = av_px_colours.iter().map(|cmp_px| euclidean_distance(&px, cmp_px)).min().map_or(false, |x| x < THRESHOLD);
+
+                    if !too_close {
+                        *map.entry(px).or_default() += 1;
+                    }
                 }
             }
 
-            let divisor = width_chunk_size * height_chunk_size;
-            let final_average_for_chunk = Rgb([(accum_r / divisor) as u8, (accum_g / divisor) as u8, (accum_b / divisor) as u8]);
-            av_px_colours.push(final_average_for_chunk);
+            let (most_common, _) = map.into_iter().max_by_key(|(_, count)| *count).unwrap();
+            av_px_colours.push(most_common);
         }
     }
 
