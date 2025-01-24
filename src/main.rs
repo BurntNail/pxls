@@ -192,8 +192,10 @@ fn main() -> anyhow::Result<()> {
     let image = ImageReader::open(input)?.decode()?;
     println!("Image read in");
 
+    println!("Generating palette");
     let av_px_colours = get_palette(&image, chunks_per_dimension, closeness_threshold, algorithm);
     println!("Palette generated with {} colours", av_px_colours.len());
+    println!("Converting image to palette & shrinking");
     let output_img = convert_to_palette(&image, &av_px_colours, algorithm, output_px_size);
     println!("Output image generated");
 
