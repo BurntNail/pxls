@@ -13,28 +13,27 @@ fn main() -> anyhow::Result<()> {
     println!("decoded image");
 
     println!("getting palette");
-    let av_px_colours = get_av_px_colours(&image);
+    let av_px_colours = get_av_px_colours(&image, 6);
     println!("found palette");
 
-
-    convert_to_palette(&image, &av_px_colours, euclidean_distance)?;
-    convert_to_palette(&image, &av_px_colours, manhattan_distance)?;
-    convert_to_palette(&image, &av_px_colours, sum_diff)?;
-    convert_to_palette(&image, &av_px_colours, prod_diff)?;
+    let sf = 32;
+    convert_to_palette(&image, &av_px_colours, euclidean_distance, sf)?;
+    convert_to_palette(&image, &av_px_colours, manhattan_distance, sf)?;
+    convert_to_palette(&image, &av_px_colours, sum_diff, sf)?;
+    convert_to_palette(&image, &av_px_colours, prod_diff, sf)?;
 
     Ok(())
 }
 
 
-fn get_av_px_colours (image: &DynamicImage) -> Vec<Rgb<u8>> {
-    const LENGTH_SECTION_SIZE: u32 = 4;
+fn get_av_px_colours (image: &DynamicImage, chunks_per_dimension: u32) -> Vec<Rgb<u8>> {
     let (width, height) = image.dimensions();
-    let (width_chunk_size, height_chunk_size) = (width / LENGTH_SECTION_SIZE, height / LENGTH_SECTION_SIZE);
+    let (width_chunk_size, height_chunk_size) = (width / chunks_per_dimension, height / chunks_per_dimension);
 
-    let mut av_px_colours = Vec::with_capacity((LENGTH_SECTION_SIZE * LENGTH_SECTION_SIZE) as usize);
-    for chunk_x in 0..LENGTH_SECTION_SIZE {
+    let mut av_px_colours = Vec::with_capacity((chunks_per_dimension * chunks_per_dimension) as usize);
+    for chunk_x in 0..chunks_per_dimension {
         println!("\tprocessing x chunk {}", chunk_x + 1);
-        for chunk_y in 0..LENGTH_SECTION_SIZE {
+        for chunk_y in 0..chunks_per_dimension {
 
             let mut map: HashMap<_, u32> = HashMap::new();
             for px_x in (width_chunk_size * chunk_x)..(width_chunk_size * (chunk_x + 1)) {
@@ -57,29 +56,46 @@ fn get_av_px_colours (image: &DynamicImage) -> Vec<Rgb<u8>> {
     av_px_colours
 }
 
-fn convert_to_palette (input: &DynamicImage, palette: &[Rgb<u8>], dist_func: impl Fn(&Rgb<u8>, &Rgb<u8>) -> u32) -> anyhow::Result<()> {
-    let mut new_img = DynamicImage::new(input.width(), input.height(), ColorType::Rgb8);
+fn convert_to_palette (input: &DynamicImage, palette: &[Rgb<u8>], dist_func: impl Fn(&Rgb<u8>, &Rgb<u8>) -> u32, scaling_factor: u32) -> anyhow::Result<()> {
+    let (width, height) = input.dimensions();
 
     let fn_name = std::any::type_name_of_val(&dist_func);
     println!("starting to convert with {fn_name}");
-    for x in 0..input.width() {
-        if x % 100 == 0 {
-            println!("\tprocessing col {}", x + 1);
-        }
 
-        for y in 0..input.height() {
-            let px = input.get_pixel(x, y).to_rgb();
+    let (num_width_chunks, num_height_chunks) = (width / scaling_factor, height / scaling_factor);
+    let mut looks_pixely = DynamicImage::new(width, height, ColorType::Rgb8);
 
+    for chunk_x in 0..num_width_chunks {
+        for chunk_y in 0..num_height_chunks {
+            let (mut accum_r, mut accum_g, mut accum_b) = (0_u64, 0_u64, 0_u64);
+
+            for px_x in (scaling_factor * chunk_x)..(scaling_factor * (chunk_x + 1)) {
+                for px_y in (scaling_factor * chunk_y)..(scaling_factor * (chunk_y + 1)) {
+                    let [r, g, b] = input.get_pixel(px_x, px_y).to_rgb().0;
+                    accum_r += r as u64;
+                    accum_g += g as u64;
+                    accum_b += b as u64;
+                }
+            }
+
+            let divisor = (scaling_factor * scaling_factor) as u64;
+
+            let av_px = Rgb([(accum_r / divisor) as u8, (accum_g / divisor) as u8, (accum_b / divisor) as u8]);
             let chosen_new_colour = palette.iter().copied().min_by_key(|rgb| {
-                dist_func(rgb, &px)
-            }).unwrap();
+                dist_func(rgb, &av_px)
+            }).unwrap().to_rgba();
 
-            new_img.put_pixel(x, y, chosen_new_colour.to_rgba());
+            for px_x in (scaling_factor * chunk_x)..(scaling_factor * (chunk_x + 1)) {
+                for px_y in (scaling_factor * chunk_y)..(scaling_factor * (chunk_y + 1)) {
+                    looks_pixely.put_pixel(px_x, px_y, chosen_new_colour);
+                }
+            }
+
         }
     }
 
     println!("finished conversion, saving");
-    new_img.save(format!("{fn_name}.jpg"))?;
+    looks_pixely.save(format!("{fn_name}.jpg"))?;
     Ok(())
 }
 
