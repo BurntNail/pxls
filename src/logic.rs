@@ -1,12 +1,30 @@
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use image::{ColorType, DynamicImage, GenericImage, GenericImageView, Pixel, Rgba};
 use indicatif::ProgressBar;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum DistanceAlgorithm {
     Euclidean,
     Manhattan,
 }
+
+impl DistanceAlgorithm {
+    pub const fn to_str (self) -> &'static str {
+        match self {
+            Self::Euclidean => "Euclidean",
+            Self::Manhattan => "Manhattan",
+        }
+    }
+}
+
+impl Display for DistanceAlgorithm {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_str())
+    }
+}
+
+pub const ALL_ALGOS: [DistanceAlgorithm; 2] = [DistanceAlgorithm::Euclidean, DistanceAlgorithm::Manhattan];
 
 impl DistanceAlgorithm {
     pub fn distance(&self, a: &Rgba<u8>, b: &Rgba<u8>) -> u32 {
@@ -128,17 +146,24 @@ pub fn dither_palette(
             let mut cloned_palette = palette.to_vec();
             cloned_palette.sort_by_key(|rgb| distances[rgb]);
 
-            let mut second = cloned_palette.swap_remove(1).to_rgba();
-            let first = cloned_palette.swap_remove(0).to_rgba();
+            let (first, second) = if cloned_palette.len() == 1 {
+                let first = cloned_palette.remove(0);
+                (first, first)
+            } else {
+                let second = cloned_palette.swap_remove(1).to_rgba();
+                let first = cloned_palette.swap_remove(0).to_rgba();
 
-            let first_distance = distances[&first];
-            let second_distance = distances[&second];
+                let first_distance = distances[&first];
+                let second_distance = distances[&second];
 
-            let inter_candidate_distance = distance_algorithm.distance(&first, &second);
+                let inter_candidate_distance = distance_algorithm.distance(&first, &second);
 
-            if first_distance.abs_diff(second_distance) > (inter_candidate_distance / 4) {
-                second = first;
-            }
+                if first_distance.abs_diff(second_distance) > (inter_candidate_distance / 4) {
+                    (first, first)
+                } else {
+                    (first, second)
+                }
+            };
 
             for px_x in (output_px_size * chunk_x)..(output_px_size * (chunk_x + 1)) {
                 for px_y in (output_px_size * chunk_y)..(output_px_size * (chunk_y + 1)) {

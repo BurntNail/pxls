@@ -6,7 +6,7 @@ use egui::panel::TopBottomSide;
 use egui_extras::install_image_loaders;
 use image::{DynamicImage, GenericImageView, ImageReader, Pixel, Rgba};
 use rfd::FileDialog;
-use crate::logic::{dither_palette, get_palette, DistanceAlgorithm};
+use crate::logic::{dither_palette, get_palette, DistanceAlgorithm, ALL_ALGOS};
 
 pub fn gui_main () {
     let native_options = NativeOptions::default();
@@ -124,19 +124,34 @@ impl PxlsApp {
 impl eframe::App for PxlsApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         egui::TopBottomPanel::new(TopBottomSide::Top, "top_panel").show(ctx, |ui| {
-            if ui.button("Select File").clicked() {
-                if let Some(file) = FileDialog::new()
-                    .add_filter("images", &["jpg", "png", "jpeg"])
-                    .set_directory(current_dir().unwrap_or_else(|_| "/".into()))
-                    .pick_file() {
-                    match PhotoBeingEdited::new(file, self.palette_settings, self.output_settings, self.distance_algorithm, &ctx) {
-                        Ok(wked) => self.current = Some(wked),
-                        Err(e) => {
-                            eprintln!("Error creating new photo being edited: {e:?}");
+            ui.horizontal(|ui| {
+                if ui.button("Select File").clicked() {
+                    if let Some(file) = FileDialog::new()
+                        .add_filter("images", &["jpg", "png", "jpeg"])
+                        .set_directory(current_dir().unwrap_or_else(|_| "/".into()))
+                        .pick_file() {
+                        match PhotoBeingEdited::new(file, self.palette_settings, self.output_settings, self.distance_algorithm, &ctx) {
+                            Ok(wked) => self.current = Some(wked),
+                            Err(e) => {
+                                eprintln!("Error creating new photo being edited: {e:?}");
+                            }
                         }
                     }
                 }
-            }
+
+                ui.vertical(|ui| {
+                    let current = self.distance_algorithm;
+                    for possibility in ALL_ALGOS {
+                        ui.radio_value(&mut self.distance_algorithm, possibility, possibility.to_str());
+                    }
+
+                    if current != self.distance_algorithm {
+                        if let Some(current) = self.current.as_mut() {
+                            current.change_palette_settings_or_algo(self.palette_settings, self.output_settings, self.distance_algorithm, ctx);
+                        }
+                    }
+                });
+            });
         });
 
         if let Some(current) = self.current.as_mut() {
