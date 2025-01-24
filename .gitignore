@@ -1,2 +1,5 @@
 *.jpg
 target/
+*.data
+*.svg
+*.data.old

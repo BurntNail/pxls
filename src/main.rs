@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hint::black_box;
 use anyhow::bail;
 use image::{ColorType, DynamicImage, GenericImage, GenericImageView, ImageReader, Pixel, Rgb};
 
@@ -13,7 +14,7 @@ fn main() -> anyhow::Result<()> {
     println!("decoded image");
 
     println!("getting palette");
-    let av_px_colours = get_av_px_colours(&image, 6);
+    let av_px_colours = get_palette(&image, 6);
     println!("found palette");
 
     let sf = 32;
@@ -26,7 +27,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 
-fn get_av_px_colours (image: &DynamicImage, chunks_per_dimension: u32) -> Vec<Rgb<u8>> {
+fn get_palette(image: &DynamicImage, chunks_per_dimension: u32) -> Vec<Rgb<u8>> {
     let (width, height) = image.dimensions();
     let (width_chunk_size, height_chunk_size) = (width / chunks_per_dimension, height / chunks_per_dimension);
 
@@ -39,8 +40,15 @@ fn get_av_px_colours (image: &DynamicImage, chunks_per_dimension: u32) -> Vec<Rg
             for px_x in (width_chunk_size * chunk_x)..(width_chunk_size * (chunk_x + 1)) {
                 for px_y in (height_chunk_size * chunk_y)..(height_chunk_size * (chunk_y + 1)) {
                     let px = image.get_pixel(px_x, px_y).to_rgb();
-                    const THRESHOLD: u32 = 100;
-                    let too_close = av_px_colours.iter().map(|cmp_px| euclidean_distance(&px, cmp_px)).min().map_or(false, |x| x < THRESHOLD);
+
+                    const THRESHOLD: u32 = 50;
+                    let mut too_close = false;
+                    for so_far in &av_px_colours {
+                        if euclidean_distance(&px, so_far) < THRESHOLD {
+                            too_close = true;
+                            break;
+                        }
+                    }
 
                     if !too_close {
                         *map.entry(px).or_default() += 1;
@@ -95,24 +103,25 @@ fn convert_to_palette (input: &DynamicImage, palette: &[Rgb<u8>], dist_func: imp
     }
 
     println!("finished conversion, saving");
-    looks_pixely.save(format!("{fn_name}.jpg"))?;
+    // looks_pixely.save(format!("{fn_name}.jpg"))?;
+    black_box(looks_pixely);
     Ok(())
 }
 
 #[inline]
 fn euclidean_distance(Rgb([r, g, b]): &Rgb<u8>, Rgb([cmp_r, cmp_g, cmp_b]): &Rgb<u8>) -> u32 {
-    let delta_r = r.max(cmp_r) - r.min(cmp_r);
-    let delta_g = g.max(cmp_g) - g.min(cmp_g);
-    let delta_b = b.max(cmp_b) - b.min(cmp_b);
+    let delta_r = r.abs_diff(*cmp_r);
+    let delta_g = g.abs_diff(*cmp_g);
+    let delta_b = b.abs_diff(*cmp_b);
 
     (delta_r as u32).pow(2) + (delta_g as u32).pow(2) + (delta_b as u32).pow(2)
 }
 
 #[inline]
 fn manhattan_distance(Rgb([r, g, b]): &Rgb<u8>, Rgb([cmp_r, cmp_g, cmp_b]): &Rgb<u8>) -> u32 {
-    let delta_r = r.max(cmp_r) - r.min(cmp_r);
-    let delta_g = g.max(cmp_g) - g.min(cmp_g);
-    let delta_b = b.max(cmp_b) - b.min(cmp_b);
+    let delta_r = r.abs_diff(*cmp_r);
+    let delta_g = g.abs_diff(*cmp_g);
+    let delta_b = b.abs_diff(*cmp_b);
 
     delta_r as u32 + delta_g as u32 + delta_b as u32
 }
@@ -122,7 +131,7 @@ fn sum_diff(Rgb([r, g, b]): &Rgb<u8>, Rgb([cmp_r, cmp_g, cmp_b]): &Rgb<u8>) -> u
     let a = *r as u32 + *g as u32 + *b as u32;
     let b = *cmp_r as u32 + *cmp_g as u32 + *cmp_b as u32;
 
-    a.max(b) - a.min(b)
+    a.abs_diff(b)
 }
 
 #[inline]
@@ -130,5 +139,5 @@ fn prod_diff(Rgb([r, g, b]): &Rgb<u8>, Rgb([cmp_r, cmp_g, cmp_b]): &Rgb<u8>) -> 
     let a = *r as u32 * *g as u32 * *b as u32;
     let b = *cmp_r as u32 * *cmp_g as u32 * *cmp_b as u32;
 
-    a.max(b) - a.min(b)
+    a.abs_diff(b)
 }
