@@ -1,6 +1,6 @@
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{FuzzySelect, Input};
-use image::{ColorType, DynamicImage, GenericImage, GenericImageView, ImageReader, Pixel, Rgb};
+use image::{ColorType, DynamicImage, GenericImage, GenericImageView, ImageReader, Pixel, Rgba};
 use indicatif::ProgressBar;
 use std::collections::HashMap;
 use std::fs;
@@ -23,11 +23,11 @@ pub enum DistanceAlgorithm {
 }
 
 impl DistanceAlgorithm {
-    fn distance(&self, a: &Rgb<u8>, b: &Rgb<u8>) -> u32 {
+    fn distance(&self, a: &Rgba<u8>, b: &Rgba<u8>) -> u32 {
         #[inline]
         fn euclidean_distance(
-            Rgb([r, g, b]): &Rgb<u8>,
-            Rgb([cmp_r, cmp_g, cmp_b]): &Rgb<u8>,
+            Rgba([r, g, b, _]): &Rgba<u8>,
+            Rgba([cmp_r, cmp_g, cmp_b, _]): &Rgba<u8>,
         ) -> u32 {
             let delta_r = r.abs_diff(*cmp_r);
             let delta_g = g.abs_diff(*cmp_g);
@@ -38,8 +38,8 @@ impl DistanceAlgorithm {
 
         #[inline]
         fn manhattan_distance(
-            Rgb([r, g, b]): &Rgb<u8>,
-            Rgb([cmp_r, cmp_g, cmp_b]): &Rgb<u8>,
+            Rgba([r, g, b, _]): &Rgba<u8>,
+            Rgba([cmp_r, cmp_g, cmp_b, _]): &Rgba<u8>,
         ) -> u32 {
             let delta_r = r.abs_diff(*cmp_r);
             let delta_g = g.abs_diff(*cmp_g);
@@ -192,11 +192,25 @@ fn main() -> anyhow::Result<()> {
     let image = ImageReader::open(input)?.decode()?;
     println!("Image read in");
 
+    //tyvm https://stackoverflow.com/questions/26885198/find-closest-factor-to-a-number-of-a-number
+    let get_closest_factor = |target, number| {
+        for i in 0..number {
+            if number % (target + i) == 0 {
+                return target + i;
+            } else if number % (target - i) == 0 {
+                return target - i;
+            }
+        }
+        return number;
+    };
+
+    let output_px_size = get_closest_factor(image.width(), output_px_size);
+
     println!("Generating palette");
     let av_px_colours = get_palette(&image, chunks_per_dimension, closeness_threshold, algorithm);
     println!("Palette generated with {} colours", av_px_colours.len());
     println!("Converting image to palette & shrinking");
-    let output_img = convert_to_palette(&image, &av_px_colours, algorithm, output_px_size);
+    let output_img = dither_palette(&image, &av_px_colours, algorithm, output_px_size);
     println!("Output image generated");
 
     output_img.save(&output)?;
@@ -214,7 +228,7 @@ fn get_palette(
     chunks_per_dimension: u32,
     closeness_threshold: u32,
     dist_algo: DistanceAlgorithm,
-) -> Vec<Rgb<u8>> {
+) -> Vec<Rgba<u8>> {
     let (width, height) = image.dimensions();
     let chunks_per_dimension = chunks_per_dimension.min(width).min(height);
     let (width_chunk_size, height_chunk_size) =
@@ -228,7 +242,7 @@ fn get_palette(
             let mut map: HashMap<_, u32> = HashMap::new();
             for px_x in (width_chunk_size * chunk_x)..(width_chunk_size * (chunk_x + 1)) {
                 for px_y in (height_chunk_size * chunk_y)..(height_chunk_size * (chunk_y + 1)) {
-                    let px = image.get_pixel(px_x, px_y).to_rgb();
+                    let px = image.get_pixel(px_x, px_y);
 
                     let mut too_close = false;
                     for so_far in &av_px_colours {
@@ -255,15 +269,16 @@ fn get_palette(
     av_px_colours
 }
 
-fn convert_to_palette(
+
+fn dither_palette(
     input: &DynamicImage,
-    palette: &[Rgb<u8>],
+    palette: &[Rgba<u8>],
     distance_algorithm: DistanceAlgorithm,
-    scaling_factor: u32,
+    output_px_size: u32,
 ) -> DynamicImage {
     let (width, height) = input.dimensions();
 
-    let (num_width_chunks, num_height_chunks) = (width / scaling_factor, height / scaling_factor);
+    let (num_width_chunks, num_height_chunks) = (width / output_px_size, height / output_px_size);
     let mut output = DynamicImage::new(width, height, ColorType::Rgb8);
 
     let chunks_progress_bar = ProgressBar::new((num_width_chunks * num_height_chunks) as u64);
@@ -272,8 +287,8 @@ fn convert_to_palette(
         for chunk_y in 0..num_height_chunks {
             let (mut accum_r, mut accum_g, mut accum_b) = (0_u64, 0_u64, 0_u64);
 
-            for px_x in (scaling_factor * chunk_x)..(scaling_factor * (chunk_x + 1)) {
-                for px_y in (scaling_factor * chunk_y)..(scaling_factor * (chunk_y + 1)) {
+            for px_x in (output_px_size * chunk_x)..(output_px_size * (chunk_x + 1)) {
+                for px_y in (output_px_size * chunk_y)..(output_px_size * (chunk_y + 1)) {
                     let [r, g, b] = input.get_pixel(px_x, px_y).to_rgb().0;
                     accum_r += r as u64;
                     accum_g += g as u64;
@@ -281,23 +296,45 @@ fn convert_to_palette(
                 }
             }
 
-            let divisor = (scaling_factor * scaling_factor) as u64;
+            let divisor = (output_px_size * output_px_size) as u64;
 
-            let av_px = Rgb([
+            let av_px = Rgba([
                 (accum_r / divisor) as u8,
                 (accum_g / divisor) as u8,
                 (accum_b / divisor) as u8,
+                u8::MAX
             ]);
-            let chosen_new_colour = palette
-                .iter()
-                .copied()
-                .min_by_key(|rgb| distance_algorithm.distance(rgb, &av_px))
-                .unwrap()
-                .to_rgba();
 
-            for px_x in (scaling_factor * chunk_x)..(scaling_factor * (chunk_x + 1)) {
-                for px_y in (scaling_factor * chunk_y)..(scaling_factor * (chunk_y + 1)) {
-                    output.put_pixel(px_x, px_y, chosen_new_colour);
+            let distances: HashMap<_, _> = palette.iter().cloned().map(|x| (x, distance_algorithm.distance(&x, &av_px))).collect();
+
+            let mut cloned_palette = palette.to_vec();
+            cloned_palette.sort_by_key(|rgb| distances[rgb]);
+
+            let mut second = cloned_palette.swap_remove(1).to_rgba();
+            let first = cloned_palette.swap_remove(0).to_rgba();
+
+            let first_distance = distances[&first];
+            let second_distance = distances[&second];
+
+            let inter_candidate_distance = distance_algorithm.distance(&first, &second);
+
+            if first_distance.abs_diff(second_distance) > (inter_candidate_distance / 4) {
+                second = first;
+            }
+
+            for px_x in (output_px_size * chunk_x)..(output_px_size * (chunk_x + 1)) {
+                for px_y in (output_px_size * chunk_y)..(output_px_size * (chunk_y + 1)) {
+                    let mut should_dither = (px_y % (output_px_size / 2)) < (output_px_size / 4);
+
+                    if (px_x % (output_px_size / 2)) < (output_px_size / 4) {
+                        should_dither = !should_dither;
+                    }
+
+                    if should_dither {
+                        output.put_pixel(px_x, px_y, first);
+                    }  else {
+                        output.put_pixel(px_x, px_y, second);
+                    }
                 }
             }
 

@@ -3,3 +3,4 @@ target/
 *.data
 *.svg
 *.data.old
+*.png
