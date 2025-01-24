@@ -111,6 +111,7 @@ pub fn dither_palette(
     palette: &[Rgba<u8>],
     distance_algorithm: DistanceAlgorithm,
     output_px_size: u32,
+    dithering_factor: u32,
 ) -> DynamicImage {
     let (width, height) = input.dimensions();
 
@@ -158,7 +159,7 @@ pub fn dither_palette(
 
                 let inter_candidate_distance = distance_algorithm.distance(&first, &second);
 
-                if first_distance.abs_diff(second_distance) > (inter_candidate_distance / 4) {
+                if first_distance.abs_diff(second_distance) > (inter_candidate_distance / dithering_factor) {
                     (first, first)
                 } else {
                     (first, second)

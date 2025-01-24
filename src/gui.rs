@@ -20,44 +20,50 @@ struct PhotoBeingEdited {
     input: DynamicImage,
     palette: Vec<Rgba<u8>>,
     handle: TextureHandle,
-    texture_options: TextureOptions
+    texture_options: TextureOptions,
+    output: DynamicImage,
+    output_file_name: String,
 }
 
 impl PhotoBeingEdited {
     pub fn new (input_file: PathBuf, palette_settings: PaletteSettings, output_settings: OutputSettings, distance_algorithm: DistanceAlgorithm, ctx: &Context) -> anyhow::Result<Self> {
         let input = ImageReader::open(input_file)?.decode()?;
         let palette = get_palette(&input, palette_settings.chunks_per_dimension, palette_settings.closeness_threshold, distance_algorithm);
-        let output = dither_palette(&input, &palette, distance_algorithm, output_settings.output_px_size);
+        let output = dither_palette(&input, &palette, distance_algorithm, output_settings.output_px_size, output_settings.dithering_factor);
 
         let texture_options = TextureOptions::LINEAR;
 
-        let handle = ctx.load_texture("my-img", Self::color_image_from_dynamic_image(output), texture_options);
+        let handle = ctx.load_texture("img", Self::color_image_from_dynamic_image(&output), texture_options);
 
         Ok(Self {
             input,
             palette,
             handle,
-            texture_options
+            texture_options,
+            output,
+            output_file_name: "output.jpeg".to_string()
         })
     }
 
     pub fn change_palette_settings_or_algo(&mut self, palette_settings: PaletteSettings, output_settings: OutputSettings, distance_algorithm: DistanceAlgorithm, ctx: &Context) {
         let palette = get_palette(&self.input, palette_settings.chunks_per_dimension, palette_settings.closeness_threshold, distance_algorithm);
-        let output = dither_palette(&self.input, &palette, distance_algorithm, output_settings.output_px_size);
-        let handle = ctx.load_texture("my-img", Self::color_image_from_dynamic_image(output), self.texture_options);
+        let output = dither_palette(&self.input, &palette, distance_algorithm, output_settings.output_px_size, output_settings.dithering_factor);
+        let handle = ctx.load_texture("my-img", Self::color_image_from_dynamic_image(&output), self.texture_options);
 
         self.palette = palette;
+        self.output = output;
         self.handle = handle;
     }
 
     pub fn change_output_settings (&mut self, output_settings: OutputSettings, distance_algorithm: DistanceAlgorithm, ctx: &Context) {
-        let output = dither_palette(&self.input, &self.palette, distance_algorithm, output_settings.output_px_size);
-        let handle = ctx.load_texture("my-img", Self::color_image_from_dynamic_image(output), self.texture_options);
+        let output = dither_palette(&self.input, &self.palette, distance_algorithm, output_settings.output_px_size, output_settings.dithering_factor);
+        let handle = ctx.load_texture("my-img", Self::color_image_from_dynamic_image(&output), self.texture_options);
 
+        self.output = output;
         self.handle = handle;
     }
 
-    fn color_image_from_dynamic_image (img: DynamicImage) -> ColorImage {
+    fn color_image_from_dynamic_image (img: &DynamicImage) -> ColorImage {
         let (width, height) = (img.width() as _, img.height() as _);
         let mut pixels = Vec::with_capacity(width * height * 3);
 
@@ -91,12 +97,14 @@ impl Default for PaletteSettings {
 #[derive(Copy, Clone, Debug)]
 struct OutputSettings {
     output_px_size: u32,
+    dithering_factor: u32,
 }
 
 impl Default for OutputSettings {
     fn default() -> Self {
         Self {
             output_px_size: 32,
+            dithering_factor: 4,
         }
     }
 }
@@ -106,6 +114,7 @@ struct SettingsBuffers {
     chunks_per_dimension: String,
     closeness_threshold: String,
     output_px_size: String,
+    dithering_factor: String,
 }
 
 
@@ -117,6 +126,7 @@ struct PxlsApp {
     setting_change_buffers: SettingsBuffers,
     needs_to_refresh_palette: bool,
     needs_to_refresh_output: bool,
+    auto_update: bool,
 }
 
 impl PxlsApp {
@@ -131,10 +141,12 @@ impl PxlsApp {
             distance_algorithm: DistanceAlgorithm::Euclidean,
             palette_settings,
             output_settings,
+            auto_update: false,
             setting_change_buffers: SettingsBuffers {
                 chunks_per_dimension: palette_settings.chunks_per_dimension.to_string(),
                 closeness_threshold: palette_settings.closeness_threshold.to_string(),
-                output_px_size: output_settings.output_px_size.to_string()
+                output_px_size: output_settings.output_px_size.to_string(),
+                dithering_factor: output_settings.dithering_factor.to_string(),
             },
             needs_to_refresh_output: false,
             needs_to_refresh_palette: false,
@@ -146,19 +158,23 @@ impl eframe::App for PxlsApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         egui::TopBottomPanel::new(TopBottomSide::Top, "top_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if ui.button("Select File").clicked() {
-                    if let Some(file) = FileDialog::new()
-                        .add_filter("images", &["jpg", "png", "jpeg"])
-                        .set_directory(current_dir().unwrap_or_else(|_| "/".into()))
-                        .pick_file() {
-                        match PhotoBeingEdited::new(file, self.palette_settings, self.output_settings, self.distance_algorithm, &ctx) {
-                            Ok(wked) => self.current = Some(wked),
-                            Err(e) => {
-                                eprintln!("Error creating new photo being edited: {e:?}");
+                ui.vertical(|ui| {
+                    if ui.button("Select File").clicked() {
+                        if let Some(file) = FileDialog::new()
+                            .add_filter("images", &["jpg", "png", "jpeg"])
+                            .set_directory(current_dir().unwrap_or_else(|_| "/".into()))
+                            .pick_file() {
+                            match PhotoBeingEdited::new(file, self.palette_settings, self.output_settings, self.distance_algorithm, &ctx) {
+                                Ok(wked) => self.current = Some(wked),
+                                Err(e) => {
+                                    eprintln!("Error creating new photo being edited: {e:?}");
+                                }
                             }
                         }
                     }
-                }
+
+                    ui.checkbox(&mut self.auto_update, "Auto-Update");
+                });
 
                 ui.vertical(|ui| {
                     ui.label("Distance Algorithm:");
@@ -188,6 +204,10 @@ impl eframe::App for PxlsApp {
                         ui.label("Virtual Pixel Size: ");
                         ui.text_edit_singleline(&mut self.setting_change_buffers.output_px_size);
                     });
+                    ui.horizontal(|ui| {
+                        ui.label("Dithering Factor: ");
+                        ui.text_edit_singleline(&mut self.setting_change_buffers.dithering_factor);
+                    });
                 });
 
 
@@ -209,11 +229,22 @@ impl eframe::App for PxlsApp {
                         self.output_settings.output_px_size = new_output_px_size;
                     }
                 }
+                if let Ok(new_dithering_factor) = self.setting_change_buffers.dithering_factor.parse() {
+                    if new_dithering_factor != self.output_settings.dithering_factor {
+                        self.needs_to_refresh_output = true;
+                        self.output_settings.dithering_factor = new_dithering_factor;
+                    }
+                }
 
                 if self.needs_to_refresh_palette || self.needs_to_refresh_output {
                     if let Some(current) = self.current.as_mut() {
-                        ui.separator();
-                        if ui.button("Update").clicked() {
+                        let mut needs_to_update = self.auto_update;
+                        if !needs_to_update {
+                            ui.separator();
+                            needs_to_update = ui.button("Update").clicked();
+                        }
+
+                        if needs_to_update {
                             if self.needs_to_refresh_palette {
                                 current.change_palette_settings_or_algo(self.palette_settings, self.output_settings, self.distance_algorithm, ctx);
                             } else if self.needs_to_refresh_output {
@@ -251,6 +282,21 @@ impl eframe::App for PxlsApp {
                 let uv = Rect{ min:pos2(0.0, 0.0), max:pos2(uv_x, uv_y)};
 
                 ui.painter().image(texture_id, ui.available_rect_before_wrap(), uv, Color32::WHITE);
+            });
+
+            egui::TopBottomPanel::new(TopBottomSide::Bottom, "bottom-panel").show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Output File Name: ");
+                    ui.text_edit_singleline(&mut current.output_file_name);
+
+                    ui.separator();
+
+                    if ui.button("Save").clicked() {
+                        if let Err(e) = current.output.save(&current.output_file_name) {
+                            eprintln!("Error saving file: {e:?}");
+                        }
+                    }
+                })
             });
         }
     }

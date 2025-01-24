@@ -1,13 +1,14 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use anyhow::anyhow;
 use dialoguer::{FuzzySelect, Input};
 use dialoguer::theme::ColorfulTheme;
 use image::ImageReader;
 use crate::logic::{dither_palette, get_palette, DistanceAlgorithm};
 
 #[allow(dead_code)]
-pub fn cli_main() -> anyhow::Result<()> {
+pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
     let CliArgs {
         input,
         output,
@@ -15,7 +16,8 @@ pub fn cli_main() -> anyhow::Result<()> {
         closeness_threshold,
         output_px_size,
         algorithm,
-    } = CliArgs::parse()?;
+        dithering_factor
+    } = CliArgs::parse(should_ask)?;
 
     let image = ImageReader::open(input)?.decode()?;
     println!("Image read in");
@@ -38,7 +40,7 @@ pub fn cli_main() -> anyhow::Result<()> {
     let av_px_colours = get_palette(&image, chunks_per_dimension, closeness_threshold, algorithm);
     println!("Palette generated with {} colours", av_px_colours.len());
     println!("Converting image to palette & shrinking");
-    let output_img = dither_palette(&image, &av_px_colours, algorithm, output_px_size);
+    let output_img = dither_palette(&image, &av_px_colours, algorithm, output_px_size, dithering_factor);
     println!("Output image generated");
 
     output_img.save(&output)?;
@@ -58,33 +60,24 @@ pub struct CliArgs {
     closeness_threshold: u32,
     output_px_size: u32,
     algorithm: DistanceAlgorithm,
+    dithering_factor: u32,
 }
 
 impl CliArgs {
-    pub fn parse() -> anyhow::Result<Self> {
-        match Self::parse_env() {
-            Some(x) => Ok(x),
-            None => Self::parse_manual(),
+    pub fn parse(should_use_asking: bool) -> anyhow::Result<Self> {
+        if should_use_asking {
+            Self::parse_manual()
+        } else {
+            Self::parse_env().ok_or(anyhow!("unable to parse from args"))
         }
     }
 
     fn parse_env() -> Option<Self> {
         let args: Vec<String> = std::env::args().skip(1).collect();
 
-        if args.len() == 0 {
-            return None;
-        }
-        if args.len() == 1 {
-            let first =args[0].to_lowercase();
-            if ["--help", "-help", "-h", "--h", "help", "h", "?", "-?"].contains(&first.as_str()) {
-                eprintln!("usage: pxls [input_file] [chunks_per_dimension] [closeness_threshold] [distance_algo] [output_file] [output_virtual_pixel_size]");
-                std::process::exit(1);
-            }
-        }
-
         let Ok(
-            [input, chunks_per_dimension, closeness_threshold, algorithm, output, output_px_size],
-        ): Result<[String; 6], _> = args.try_into()
+            [input, chunks_per_dimension, closeness_threshold, algorithm, output, output_px_size, dithering_factor],
+        ): Result<[String; 7], _> = args.try_into()
         else {
             return None;
         };
@@ -117,6 +110,10 @@ impl CliArgs {
             eprintln!("[output_virtual_pixel_size] must be a valid u32");
             return None;
         };
+        let Ok(dithering_factor) = dithering_factor.parse() else {
+            eprintln!("[dithering_factor] must be a valid u32");
+            return None;
+        };
 
         Some(Self {
             input,
@@ -124,7 +121,8 @@ impl CliArgs {
             closeness_threshold,
             algorithm,
             output,
-            output_px_size
+            output_px_size,
+            dithering_factor
         })
     }
 
@@ -172,6 +170,9 @@ impl CliArgs {
         let output_px_size = Input::with_theme(&theme)
             .with_prompt("What should the virtual pixel size be for the output?")
             .interact()?;
+        let dithering_factor = Input::with_theme(&theme)
+            .with_prompt("What should the dithering factor be for the output?")
+            .interact()?;
 
         Ok(Self {
             input,
@@ -180,6 +181,7 @@ impl CliArgs {
             closeness_threshold,
             output_px_size,
             algorithm,
+            dithering_factor
         })
     }
 }
