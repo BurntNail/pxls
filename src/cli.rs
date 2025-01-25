@@ -1,4 +1,4 @@
-use crate::logic::{
+use pxls::{
     dither_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings,
 };
 use anyhow::anyhow;

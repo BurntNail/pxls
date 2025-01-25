@@ -1,5 +1,5 @@
 use crate::gui::worker_thread::{start_worker_thread, ThreadRequest, ThreadResult};
-use crate::logic::{DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
+use pxls::{DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
 use eframe::{CreationContext, Frame, NativeOptions};
 use egui::panel::TopBottomSide;
 use egui::{

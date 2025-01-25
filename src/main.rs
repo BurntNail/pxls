@@ -12,7 +12,6 @@ use std::env::args;
 
 mod cli;
 mod gui;
-mod logic;
 
 fn main() {
     let args: Vec<String> = args().skip(1).collect();
