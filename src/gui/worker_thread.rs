@@ -84,7 +84,7 @@ pub fn start_worker_thread() -> (
                     distance_algorithm,
                 } => {
                     let palette =
-                        get_palette(&input, palette_settings, distance_algorithm, &prog_tx);
+                        get_palette(&input, palette_settings, distance_algorithm, &prog_tx, should_stop.clone());
 
                     res_tx
                         .send(ThreadResult::RenderedPalette(input, palette))
@@ -102,6 +102,7 @@ pub fn start_worker_thread() -> (
                         distance_algorithm,
                         output_settings,
                         &prog_tx,
+                        should_stop.clone()
                     );
 
                     res_tx

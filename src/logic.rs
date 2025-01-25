@@ -1,6 +1,8 @@
 use image::{ColorType, DynamicImage, GenericImage, GenericImageView, Pixel, Rgba};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -114,6 +116,7 @@ pub fn get_palette(
     }: PaletteSettings,
     dist_algo: DistanceAlgorithm,
     progress_sender: &Sender<(u32, u32)>,
+    stop: Arc<AtomicBool>,
 ) -> Vec<Rgba<u8>> {
     let chunks_per_dimension =
         get_closest_factor(chunks_per_dimension, image.width().min(image.height()));
@@ -131,6 +134,10 @@ pub fn get_palette(
 
     for chunk_x in 0..chunks_per_dimension {
         for chunk_y in 0..chunks_per_dimension {
+            if stop.load(Ordering::Relaxed) {
+                return av_px_colours;
+            }
+
             let mut map: HashMap<_, u32> = HashMap::new();
             for px_x in (width_chunk_size * chunk_x)..(width_chunk_size * (chunk_x + 1)) {
                 for px_y in (height_chunk_size * chunk_y)..(height_chunk_size * (chunk_y + 1)) {
@@ -173,6 +180,7 @@ pub fn dither_palette(
         scale_output_to_original: output_img_scaling,
     }: OutputSettings,
     progress_sender: &Sender<(u32, u32)>,
+    stop: Arc<AtomicBool>,
 ) -> DynamicImage {
     let output_px_size = get_closest_factor(output_px_size, input.height());
 
@@ -194,6 +202,10 @@ pub fn dither_palette(
 
     for chunk_x in 0..num_width_chunks {
         for chunk_y in 0..num_height_chunks {
+            if stop.load(Ordering::Relaxed) {
+                return output;
+            }
+
             let (mut accum_r, mut accum_g, mut accum_b) = (0_u64, 0_u64, 0_u64);
 
             for px_x in (output_px_size * chunk_x)..(output_px_size * (chunk_x + 1)) {

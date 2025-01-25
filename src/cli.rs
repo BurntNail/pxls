@@ -8,6 +8,8 @@ use image::ImageReader;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::channel;
 
 #[allow(dead_code)]
@@ -23,6 +25,8 @@ pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
         dithering_scale,
     } = CliArgs::parse(should_ask)?;
 
+    let should_stop = Arc::new(AtomicBool::new(false));
+
     let image = ImageReader::open(input)?.decode()?;
     println!("Image read in");
 
@@ -36,6 +40,7 @@ pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
         },
         algorithm,
         &tx,
+        should_stop.clone()
     );
     println!("Palette generated with {} colours", av_px_colours.len());
     println!("Converting image to palette & shrinking");
@@ -50,6 +55,7 @@ pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
             scale_output_to_original: false, //TODO: consider making this an option...
         },
         &tx,
+        should_stop.clone()
     );
     //TODO: maybe the CLI should get fewer options when coming from env
     //TODO: opinionated defaults?
