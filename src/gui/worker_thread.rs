@@ -57,7 +57,6 @@ pub fn start_worker_thread() -> (
             match req {
                 ThreadRequest::GetFile => {
                     if let Some(file) = FileDialog::new()
-                        .add_filter("Images", &["jpg", "png", "jpeg"])
                         .set_directory(current_dir().unwrap_or_else(|_| "/".into()))
                         .pick_file()
                     {
