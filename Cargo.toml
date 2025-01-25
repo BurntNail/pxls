@@ -1,5 +1,9 @@
 [package]
 name = "pxls"
+description = "A library for pixelising images"
+authors = ["Jack Maguire <jack@maguire.tech>"]
+license = "MIT"
+repository = "https://github.com/BurntNail/pxls"
 version = "0.1.0"
 edition = "2021"
 
