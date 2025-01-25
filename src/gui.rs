@@ -271,6 +271,31 @@ impl eframe::App for PxlsApp {
                     }
 
                     ui.checkbox(&mut self.auto_update, "Auto-Update");
+
+                    if self.needs_to_refresh_palette || self.needs_to_refresh_output {
+                        let mut needs_to_update = self.auto_update;
+                        if !needs_to_update {
+                            needs_to_update = ui.button("Update").clicked();
+                        }
+
+                        if needs_to_update {
+                            if self.needs_to_refresh_palette {
+                                self.current.change_palette_settings_or_algo(
+                                    self.palette_settings,
+                                    self.distance_algorithm,
+                                );
+                            } else if self.needs_to_refresh_output {
+                                self.current.change_output_settings(
+                                    self.output_settings,
+                                    self.distance_algorithm,
+                                );
+                            }
+
+                            self.needs_to_refresh_palette = false;
+                            self.needs_to_refresh_output = false;
+                        }
+                    }
+
                 });
 
                 ui.vertical(|ui| {
@@ -280,7 +305,7 @@ impl eframe::App for PxlsApp {
                     for possibility in ALL_ALGOS {
                         ui.radio_value(
                             &mut self.distance_algorithm,
-                            possibility,
+                            *possibility,
                             possibility.to_str(),
                         );
                     }
@@ -365,31 +390,6 @@ impl eframe::App for PxlsApp {
                     if new_dithering_scale != self.output_settings.dithering_scale {
                         self.needs_to_refresh_output = true;
                         self.output_settings.dithering_scale = new_dithering_scale;
-                    }
-                }
-
-                if self.needs_to_refresh_palette || self.needs_to_refresh_output {
-                    let mut needs_to_update = self.auto_update;
-                    if !needs_to_update {
-                        ui.separator();
-                        needs_to_update = ui.button("Update").clicked();
-                    }
-
-                    if needs_to_update {
-                        if self.needs_to_refresh_palette {
-                            self.current.change_palette_settings_or_algo(
-                                self.palette_settings,
-                                self.distance_algorithm,
-                            );
-                        } else if self.needs_to_refresh_output {
-                            self.current.change_output_settings(
-                                self.output_settings,
-                                self.distance_algorithm,
-                            );
-                        }
-
-                        self.needs_to_refresh_palette = false;
-                        self.needs_to_refresh_output = false;
                     }
                 }
             });

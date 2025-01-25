@@ -9,6 +9,8 @@ use std::sync::mpsc::Sender;
 pub enum DistanceAlgorithm {
     Euclidean,
     Manhattan,
+    ProductDifference,
+    Brightness,
 }
 
 impl DistanceAlgorithm {
@@ -16,13 +18,15 @@ impl DistanceAlgorithm {
         match self {
             Self::Euclidean => "Euclidean",
             Self::Manhattan => "Manhattan",
+            Self::ProductDifference => "Product Difference",
+            Self::Brightness => "Brightness",
         }
     }
 
     pub const fn standardise_closeness_threshold (self, n: u32) -> u32 {
         match self {
-            Self::Euclidean => n * n,
-            Self::Manhattan => n,
+            Self::Euclidean | Self::ProductDifference => n * n,
+            Self::Manhattan | Self::Brightness => n,
         }
     }
 }
@@ -33,8 +37,8 @@ impl Display for DistanceAlgorithm {
     }
 }
 
-pub const ALL_ALGOS: [DistanceAlgorithm; 2] =
-    [DistanceAlgorithm::Euclidean, DistanceAlgorithm::Manhattan];
+pub const ALL_ALGOS: &[DistanceAlgorithm] =
+    &[DistanceAlgorithm::Euclidean, DistanceAlgorithm::Manhattan, DistanceAlgorithm::ProductDifference, DistanceAlgorithm::Brightness];
 
 impl DistanceAlgorithm {
     pub const fn distance(self, a: Rgba<u8>, b: Rgba<u8>) -> u32 {
@@ -62,9 +66,28 @@ impl DistanceAlgorithm {
             delta_r as u32 + delta_g as u32 + delta_b as u32
         }
 
+        #[inline]
+        const fn product_difference(
+            Rgba([r, g, b, _]): Rgba<u8>,
+            Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
+        ) -> u32 {
+            (r as u32 * g as u32 * b as u32).abs_diff(cmp_r as u32 * cmp_g as u32 * cmp_b as u32)
+        }
+
+        #[inline]
+        const fn brightness(
+            Rgba([r, g, b, _]): Rgba<u8>,
+            Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
+        ) -> u32 {
+            (r as u32 + g as u32 + b as u32).abs_diff(cmp_r as u32 + cmp_g as u32 + cmp_b as u32) / 3
+        }
+
+
         match self {
             Self::Euclidean => euclidean_distance(a, b),
             Self::Manhattan => manhattan_distance(a, b),
+            Self::ProductDifference => product_difference(a, b),
+            Self::Brightness => brightness(a, b)
         }
     }
 }
@@ -127,11 +150,8 @@ pub fn get_palette(
 ) -> Vec<Rgba<u8>> {
     let chunks_per_dimension =
         get_closest_factor(chunks_per_dimension, image.width().min(image.height()));
-
-    let (width, height) = image.dimensions();
-    let chunks_per_dimension = chunks_per_dimension.min(width).min(height);
     let (width_chunk_size, height_chunk_size) =
-        (width / chunks_per_dimension, height / chunks_per_dimension);
+        (image.width() / chunks_per_dimension, image.height() / chunks_per_dimension);
 
     let max_num_colours = chunks_per_dimension * chunks_per_dimension;
     let mut progress_bar = 0;
@@ -192,7 +212,7 @@ pub fn dither_palette(
     let (width, height) = input.dimensions();
 
     let (num_width_chunks, num_height_chunks) = (width / output_px_size, height / output_px_size);
-    let (output_w, output_h) = if dithering_likelihood == 1 {
+    let (output_w, output_h) = if dithering_scale == 1 {
         (num_width_chunks, num_height_chunks)
     } else {
         (
@@ -240,7 +260,7 @@ pub fn dither_palette(
             let mut cloned_palette = palette.to_vec();
             cloned_palette.sort_by_key(|rgb| distances[rgb]);
 
-            let (first, second) = if cloned_palette.len() == 1 {
+            let (first, second) = if cloned_palette.len() == 1 || dithering_scale == 1 {
                 let first = cloned_palette.remove(0);
                 (first, first)
             } else {
@@ -261,20 +281,14 @@ pub fn dither_palette(
                 }
             };
 
-            if dithering_scale == 1 || dithering_likelihood == 1 {
-                for px_x in (dithering_scale * chunk_x)..(dithering_scale * (chunk_x + 1)) {
-                    for px_y in (dithering_scale * chunk_y)..(dithering_scale * (chunk_y + 1)) {
-                        output.put_pixel(px_x, px_y, first);
-                    }
-                }
-            }
-
             for px_x in (dithering_scale * chunk_x)..(dithering_scale * (chunk_x + 1)) {
                 for px_y in (dithering_scale * chunk_y)..(dithering_scale * (chunk_y + 1)) {
                     let mut should_dither = px_y % 2 == 0;
                     if px_x % 2 == 0 {
                         should_dither = !should_dither;
                     }
+
+                    should_dither |= dithering_scale > 1;
 
                     output.put_pixel(px_x, px_y, if should_dither { first } else { second });
                 }
@@ -294,7 +308,7 @@ pub fn dither_palette(
     //but
     //this logic is vastly simpler
     //and it's not like it takes that long
-    let scaling_factor = if dithering_likelihood == 1 || dithering_scale == 1 {
+    let scaling_factor = if dithering_scale == 1 {
         output_px_size
     } else {
         output_px_size / dithering_scale
