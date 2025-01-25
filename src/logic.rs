@@ -1,7 +1,7 @@
 use image::{ColorType, DynamicImage, GenericImage, GenericImageView, Pixel, Rgba};
-use indicatif::ProgressBar;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use std::sync::mpsc::Sender;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum DistanceAlgorithm {
@@ -77,9 +77,10 @@ pub fn get_palette(
     chunks_per_dimension: u32,
     closeness_threshold: u32,
     dist_algo: DistanceAlgorithm,
+    progress_sender: Sender<(u32, u32)>,
 ) -> Vec<Rgba<u8>> {
-    let chunks_per_dimension = get_closest_factor(image.width(), chunks_per_dimension);
-    let closeness_threshold = get_closest_factor(image.width(), closeness_threshold);
+    let chunks_per_dimension = get_closest_factor(chunks_per_dimension, image.width().min(image.height()));
+    let closeness_threshold = get_closest_factor(closeness_threshold, image.width().min(image.height()));
 
     let (width, height) = image.dimensions();
     let chunks_per_dimension = chunks_per_dimension.min(width).min(height);
@@ -87,8 +88,9 @@ pub fn get_palette(
         (width / chunks_per_dimension, height / chunks_per_dimension);
 
     let max_num_colours = chunks_per_dimension * chunks_per_dimension;
-    let progress_bar = ProgressBar::new(max_num_colours as u64);
+    let mut progress_bar = 0;
     let mut av_px_colours = Vec::with_capacity(max_num_colours as usize);
+
     for chunk_x in 0..chunks_per_dimension {
         for chunk_y in 0..chunks_per_dimension {
             let mut map: HashMap<_, u32> = HashMap::new();
@@ -114,7 +116,8 @@ pub fn get_palette(
                 av_px_colours.push(most_common);
             }
 
-            progress_bar.inc(1);
+            progress_bar += 1;
+            let _ = progress_sender.send((progress_bar, max_num_colours));
         }
     }
 
@@ -127,15 +130,17 @@ pub fn dither_palette(
     distance_algorithm: DistanceAlgorithm,
     output_px_size: u32,
     dithering_factor: u32,
+    progress_sender: Sender<(u32, u32)>,
 ) -> DynamicImage {
-    let output_px_size = get_closest_factor(input.width(), output_px_size);
+    let output_px_size = get_closest_factor(output_px_size, input.height());
 
     let (width, height) = input.dimensions();
 
     let (num_width_chunks, num_height_chunks) = (width / output_px_size, height / output_px_size);
     let mut output = DynamicImage::new(width, height, ColorType::Rgb8);
 
-    let chunks_progress_bar = ProgressBar::new((num_width_chunks * num_height_chunks) as u64);
+    let total_chunks = num_width_chunks * num_height_chunks;
+    let mut chunks_progress_bar = 0;
 
     for chunk_x in 0..num_width_chunks {
         for chunk_y in 0..num_height_chunks {
@@ -210,7 +215,8 @@ pub fn dither_palette(
                 }
             }
 
-            chunks_progress_bar.inc(1);
+            chunks_progress_bar += 1;
+            let _ = progress_sender.send((chunks_progress_bar, total_chunks));
         }
     }
 

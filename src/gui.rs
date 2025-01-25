@@ -4,7 +4,10 @@ use crate::gui::worker_thread::{
 use crate::logic::{DistanceAlgorithm, ALL_ALGOS};
 use eframe::{CreationContext, Frame, NativeOptions};
 use egui::panel::TopBottomSide;
-use egui::{pos2, Color32, ColorImage, Context, Rect, TextureHandle, TextureId, TextureOptions};
+use egui::{
+    pos2, Color32, ColorImage, Context, ProgressBar, Rect, TextureHandle, TextureId,
+    TextureOptions, Widget,
+};
 use egui_extras::install_image_loaders;
 use image::{DynamicImage, GenericImageView, Pixel, Rgba};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,6 +43,8 @@ enum RenderStage {
 
 struct PhotoBeingEdited {
     stage: RenderStage,
+    progress_rx: Receiver<(u32, u32)>,
+    last_progress_received: (u32, u32),
     worker_handle: Option<JoinHandle<()>>,
     worker_should_stop: Arc<AtomicBool>,
     requests_tx: Sender<ThreadRequest>,
@@ -50,10 +55,13 @@ struct PhotoBeingEdited {
 
 impl PhotoBeingEdited {
     pub fn new() -> Self {
-        let (worker_handle, requests_tx, results_rx, worker_should_stop) = start_worker_thread();
+        let (worker_handle, requests_tx, results_rx, progress_rx, worker_should_stop) =
+            start_worker_thread();
 
         Self {
             stage: RenderStage::Nothing,
+            progress_rx,
+            last_progress_received: (0, 1),
             worker_handle: Some(worker_handle),
             requests_tx,
             results_rx,
@@ -86,6 +94,7 @@ impl PhotoBeingEdited {
                             distance_algorithm,
                         })
                         .unwrap(); //TODO: fix all these unwraps
+                    self.last_progress_received = (0, 1);
                 }
                 ThreadResult::RenderedPalette(input, palette) => {
                     self.stage = RenderStage::WithPalette;
@@ -97,6 +106,7 @@ impl PhotoBeingEdited {
                             distance_algorithm,
                         })
                         .unwrap();
+                    self.last_progress_received = (0, 1);
                 }
                 ThreadResult::RenderedImage {
                     input,
@@ -115,8 +125,13 @@ impl PhotoBeingEdited {
                         output,
                         handle,
                     };
+                    self.last_progress_received = (0, 1);
                 }
             }
+        }
+
+        for prog in self.progress_rx.try_iter() {
+            self.last_progress_received = prog;
         }
     }
 
@@ -144,7 +159,7 @@ impl PhotoBeingEdited {
         output_settings: OutputSettings,
         distance_algorithm: DistanceAlgorithm,
     ) {
-        let originally_contained = std::mem::replace(&mut self.stage, RenderStage::ReadInImage);
+        let originally_contained = std::mem::replace(&mut self.stage, RenderStage::WithPalette);
         if let RenderStage::RenderedImage { input, palette, .. } = originally_contained {
             self.requests_tx
                 .send(ThreadRequest::RenderOutput {
@@ -357,14 +372,16 @@ impl eframe::App for PxlsApp {
                     });
                 }
                 RenderStage::ReadInImage => {
-                    ui.centered_and_justified(|ui| {
-                        ui.label("Creating palette...");
-                    });
+                    ui.label("Creating palette...");
+
+                    let (so_far, max) = self.current.last_progress_received;
+                    ProgressBar::new((so_far as f32) / (max as f32)).animate(true).show_percentage().ui(ui);
                 }
                 RenderStage::WithPalette => {
-                    ui.centered_and_justified(|ui| {
-                        ui.label("Converting and dithering...");
-                    });
+                    ui.label("Converting and dithering...");
+
+                    let (so_far, max) = self.current.last_progress_received;
+                    ProgressBar::new((so_far as f32) / (max as f32)).animate(true).show_percentage().ui(ui);
                 }
                 RenderStage::RenderedImage { input, handle, .. } => {
                     let texture_id = TextureId::from(handle);
@@ -386,9 +403,18 @@ impl eframe::App for PxlsApp {
                         max: pos2(uv_x, uv_y),
                     };
 
+                    // let rect = Rect {
+                    //     min: pos2(0.0, 15.0),
+                    //     max: {
+                    //         let size = ui.available_size_before_wrap();
+                    //         pos2(size.x / uv_x, size.y / uv_y)
+                    //     },
+                    // };
+                    let rect = ui.available_rect_before_wrap();
+
                     ui.painter().image(
                         texture_id,
-                        ui.available_rect_before_wrap(),
+                        rect,
                         uv,
                         Color32::WHITE,
                     );

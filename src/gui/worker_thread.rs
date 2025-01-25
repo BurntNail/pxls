@@ -66,10 +66,12 @@ pub fn start_worker_thread() -> (
     JoinHandle<()>,
     Sender<ThreadRequest>,
     Receiver<ThreadResult>,
+    Receiver<(u32, u32)>,
     Arc<AtomicBool>,
 ) {
     let (req_tx, req_rx) = channel();
     let (res_tx, res_rx) = channel();
+    let (prog_tx, prog_rx) = channel();
     let should_stop = Arc::new(AtomicBool::new(false));
     let ret_should_stop = should_stop.clone();
 
@@ -111,6 +113,7 @@ pub fn start_worker_thread() -> (
                         palette_settings.chunks_per_dimension,
                         palette_settings.closeness_threshold,
                         distance_algorithm,
+                        prog_tx.clone(),
                     );
 
                     res_tx
@@ -129,6 +132,7 @@ pub fn start_worker_thread() -> (
                         distance_algorithm,
                         output_settings.output_px_size,
                         output_settings.dithering_factor,
+                        prog_tx.clone(),
                     );
 
                     res_tx
@@ -143,5 +147,5 @@ pub fn start_worker_thread() -> (
         }
     });
 
-    (handle, req_tx, res_rx, ret_should_stop)
+    (handle, req_tx, res_rx, prog_rx, ret_should_stop)
 }

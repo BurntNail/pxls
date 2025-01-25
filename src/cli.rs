@@ -6,6 +6,7 @@ use image::ImageReader;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::mpsc::channel;
 
 #[allow(dead_code)]
 pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
@@ -23,7 +24,14 @@ pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
     println!("Image read in");
 
     println!("Generating palette");
-    let av_px_colours = get_palette(&image, chunks_per_dimension, closeness_threshold, algorithm);
+    let (tx, _rx) = channel();
+    let av_px_colours = get_palette(
+        &image,
+        chunks_per_dimension,
+        closeness_threshold,
+        algorithm,
+        tx.clone(),
+    );
     println!("Palette generated with {} colours", av_px_colours.len());
     println!("Converting image to palette & shrinking");
     let output_img = dither_palette(
@@ -32,6 +40,7 @@ pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
         algorithm,
         output_px_size,
         dithering_factor,
+        tx,
     );
     println!("Output image generated");
 
