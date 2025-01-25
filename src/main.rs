@@ -14,6 +14,9 @@ mod cli;
 mod gui;
 mod logic;
 
+//TODO: dither scale factor
+//TODO: output image scaling
+
 fn main() {
     let args: Vec<String> = args().skip(1).collect();
     if args.is_empty() {

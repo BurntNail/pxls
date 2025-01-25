@@ -137,7 +137,12 @@ pub fn dither_palette(
     let (width, height) = input.dimensions();
 
     let (num_width_chunks, num_height_chunks) = (width / output_px_size, height / output_px_size);
-    let mut output = DynamicImage::new(width, height, ColorType::Rgb8);
+    let (output_w, output_h) = if dithering_factor == 1 {
+        (num_width_chunks, num_height_chunks)
+    } else {
+        (num_width_chunks * 4, num_height_chunks * 4)
+    };
+    let mut output = DynamicImage::new(output_w, output_h, ColorType::Rgb8);
 
     let total_chunks = num_width_chunks * num_height_chunks;
     let mut chunks_progress_bar = 0;
@@ -194,15 +199,14 @@ pub fn dither_palette(
                 }
             };
 
-            for px_x in (output_px_size * chunk_x)..(output_px_size * (chunk_x + 1)) {
-                for px_y in (output_px_size * chunk_y)..(output_px_size * (chunk_y + 1)) {
-                    if output_px_size == 1 {
+            for px_x in (4 * chunk_x)..(4 * (chunk_x + 1)) {
+                for px_y in (4 * chunk_y)..(4 * (chunk_y + 1)) {
+                    if output_px_size == 1 || dithering_factor == 1 {
                         output.put_pixel(px_x, px_y, first);
                     } else {
-                        let mut should_dither =
-                            (px_y % (output_px_size / 2)) < (output_px_size / 4);
+                        let mut should_dither = (px_y % 4) < 2;
 
-                        if (px_x % (output_px_size / 2)) < (output_px_size / 4) {
+                        if (px_x % 4) < 2 {
                             should_dither = !should_dither;
                         }
 

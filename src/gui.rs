@@ -4,10 +4,7 @@ use crate::gui::worker_thread::{
 use crate::logic::{DistanceAlgorithm, ALL_ALGOS};
 use eframe::{CreationContext, Frame, NativeOptions};
 use egui::panel::TopBottomSide;
-use egui::{
-    pos2, Color32, ColorImage, Context, ProgressBar, Rect, TextureHandle, TextureId,
-    TextureOptions, Widget,
-};
+use egui::{pos2, Color32, ColorImage, Context, ProgressBar, Rect, TextureHandle, TextureId, TextureOptions, Widget};
 use egui_extras::install_image_loaders;
 use image::{DynamicImage, GenericImageView, Pixel, Rgba};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -364,6 +361,23 @@ impl eframe::App for PxlsApp {
             });
         });
 
+        if let RenderStage::RenderedImage { output, .. } = &self.current.stage {
+            egui::TopBottomPanel::new(TopBottomSide::Bottom, "bottom-panel").show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Output File Name: ");
+                    ui.text_edit_singleline(&mut self.current.output_file_name);
+
+                    ui.separator();
+
+                    if ui.button("Save").clicked() {
+                        if let Err(e) = output.save(&self.current.output_file_name) {
+                            eprintln!("Error saving file: {e:?}");
+                        }
+                    }
+                })
+            });
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             match &self.current.stage {
                 RenderStage::Nothing => {
@@ -385,32 +399,27 @@ impl eframe::App for PxlsApp {
                 }
                 RenderStage::RenderedImage { input, handle, .. } => {
                     let texture_id = TextureId::from(handle);
-                    let available_width = ui.available_width();
-                    let available_height = ui.available_height();
-                    let available_aspect = available_width / available_height;
-
-                    let (img_width, img_height) = (input.width() as f32, input.height() as f32);
-                    let img_aspect = img_width / img_height;
-
-                    let (uv_x, uv_y) = if available_aspect > img_aspect {
-                        (available_aspect / img_aspect, 1.0)
-                    } else {
-                        (1.0, img_aspect / available_aspect)
-                    }; //TODO: now that we've got this fun scaling, the image doesn't need to be weirdly big
 
                     let uv = Rect {
                         min: pos2(0.0, 0.0),
-                        max: pos2(uv_x, uv_y),
+                        max: pos2(1.0, 1.0),
                     };
 
-                    // let rect = Rect {
-                    //     min: pos2(0.0, 15.0),
-                    //     max: {
-                    //         let size = ui.available_size_before_wrap();
-                    //         pos2(size.x / uv_x, size.y / uv_y)
-                    //     },
-                    // };
-                    let rect = ui.available_rect_before_wrap();
+                    let mut rect = ui.available_rect_before_wrap();
+                    {
+                        let (img_width, img_height) = (input.width() as f32, input.height() as f32);
+                        let img_aspect = img_width / img_height;
+                        let available_aspect = rect.width() / rect.height();
+
+                        let (sf_x, sf_y) = if available_aspect > img_aspect {
+                            (available_aspect / img_aspect, 1.0)
+                        } else {
+                            (1.0, img_aspect / available_aspect)
+                        };
+
+                        rect.max.x = rect.min.x + rect.width() / sf_x;
+                        rect.max.y = rect.min.y + rect.height() / sf_y;
+                    }
 
                     ui.painter().image(
                         texture_id,
@@ -421,23 +430,6 @@ impl eframe::App for PxlsApp {
                 }
             }
         });
-
-        if let RenderStage::RenderedImage { output, .. } = &self.current.stage {
-            egui::TopBottomPanel::new(TopBottomSide::Bottom, "bottom-panel").show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Output File Name: ");
-                    ui.text_edit_singleline(&mut self.current.output_file_name);
-
-                    ui.separator();
-
-                    if ui.button("Save").clicked() {
-                        if let Err(e) = output.save(&self.current.output_file_name) {
-                            eprintln!("Error saving file: {e:?}");
-                        }
-                    }
-                })
-            });
-        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
