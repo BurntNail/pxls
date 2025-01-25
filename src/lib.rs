@@ -18,6 +18,13 @@ impl DistanceAlgorithm {
             Self::Manhattan => "Manhattan",
         }
     }
+
+    pub const fn standardise_closeness_threshold (self, n: u32) -> u32 {
+        match self {
+            Self::Euclidean => n * n,
+            Self::Manhattan => n,
+        }
+    }
 }
 
 impl Display for DistanceAlgorithm {
@@ -72,7 +79,7 @@ impl Default for PaletteSettings {
     fn default() -> Self {
         Self {
             chunks_per_dimension: 100,
-            closeness_threshold: 2_500,
+            closeness_threshold: 50,
         }
     }
 }
@@ -120,8 +127,6 @@ pub fn get_palette(
 ) -> Vec<Rgba<u8>> {
     let chunks_per_dimension =
         get_closest_factor(chunks_per_dimension, image.width().min(image.height()));
-    let closeness_threshold =
-        get_closest_factor(closeness_threshold, image.width().min(image.height()));
 
     let (width, height) = image.dimensions();
     let chunks_per_dimension = chunks_per_dimension.min(width).min(height);
@@ -145,7 +150,7 @@ pub fn get_palette(
 
                     let mut too_close = false;
                     for so_far in av_px_colours.iter().copied() {
-                        if dist_algo.distance(px, so_far) < closeness_threshold {
+                        if dist_algo.distance(px, so_far) < dist_algo.standardise_closeness_threshold(closeness_threshold) {
                             too_close = true;
                             break;
                         }
