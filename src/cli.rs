@@ -1,4 +1,6 @@
-use crate::logic::{dither_palette, get_palette, DistanceAlgorithm};
+use crate::logic::{
+    dither_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings,
+};
 use anyhow::anyhow;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{FuzzySelect, Input};
@@ -18,6 +20,7 @@ pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
         output_px_size,
         algorithm,
         dithering_factor,
+        dithering_scale,
     } = CliArgs::parse(should_ask)?;
 
     let image = ImageReader::open(input)?.decode()?;
@@ -27,10 +30,12 @@ pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
     let (tx, _rx) = channel();
     let av_px_colours = get_palette(
         &image,
-        chunks_per_dimension,
-        closeness_threshold,
+        PaletteSettings {
+            chunks_per_dimension,
+            closeness_threshold,
+        },
         algorithm,
-        tx.clone(),
+        &tx,
     );
     println!("Palette generated with {} colours", av_px_colours.len());
     println!("Converting image to palette & shrinking");
@@ -38,10 +43,16 @@ pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
         &image,
         &av_px_colours,
         algorithm,
-        output_px_size,
-        dithering_factor,
-        tx,
+        OutputSettings {
+            output_px_size,
+            dithering_likelihood: dithering_factor,
+            dithering_scale,
+            scale_output_to_original: false, //TODO: consider making this an option...
+        },
+        &tx,
     );
+    //TODO: maybe the CLI should get fewer options when coming from env
+    //TODO: opinionated defaults?
     println!("Output image generated");
 
     output_img.save(&output)?;
@@ -62,6 +73,7 @@ pub struct CliArgs {
     output_px_size: u32,
     algorithm: DistanceAlgorithm,
     dithering_factor: u32,
+    dithering_scale: u32,
 }
 
 impl CliArgs {
@@ -77,8 +89,8 @@ impl CliArgs {
         let args: Vec<String> = std::env::args().skip(1).collect();
 
         let Ok(
-            [input, chunks_per_dimension, closeness_threshold, algorithm, output, output_px_size, dithering_factor],
-        ): Result<[String; 7], _> = args.try_into()
+            [input, chunks_per_dimension, closeness_threshold, algorithm, output, output_px_size, dithering_factor, dithering_scale],
+        ): Result<[String; 8], _> = args.try_into()
         else {
             return None;
         };
@@ -115,6 +127,10 @@ impl CliArgs {
             eprintln!("[dithering_factor] must be a valid u32");
             return None;
         };
+        let Ok(dithering_scale) = dithering_scale.parse() else {
+            eprintln!("[dithering_scale] must be a valid u32");
+            return None;
+        };
 
         Some(Self {
             input,
@@ -124,6 +140,7 @@ impl CliArgs {
             output_px_size,
             algorithm,
             dithering_factor,
+            dithering_scale,
         })
     }
 
@@ -174,6 +191,9 @@ impl CliArgs {
         let dithering_factor = Input::with_theme(&theme)
             .with_prompt("What should the dithering factor be for the output?")
             .interact()?;
+        let dithering_scale = Input::with_theme(&theme)
+            .with_prompt("What should the dithering scale be for the output?")
+            .interact()?;
 
         Ok(Self {
             input,
@@ -183,6 +203,7 @@ impl CliArgs {
             output_px_size,
             algorithm,
             dithering_factor,
+            dithering_scale,
         })
     }
 }

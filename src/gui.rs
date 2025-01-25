@@ -1,10 +1,11 @@
-use crate::gui::worker_thread::{
-    start_worker_thread, OutputSettings, PaletteSettings, ThreadRequest, ThreadResult,
-};
-use crate::logic::{DistanceAlgorithm, ALL_ALGOS};
+use crate::gui::worker_thread::{start_worker_thread, ThreadRequest, ThreadResult};
+use crate::logic::{DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
 use eframe::{CreationContext, Frame, NativeOptions};
 use egui::panel::TopBottomSide;
-use egui::{pos2, Color32, ColorImage, Context, ProgressBar, Rect, TextureHandle, TextureId, TextureOptions, Widget};
+use egui::{
+    pos2, Color32, ColorImage, Context, ProgressBar, Rect, TextureHandle, TextureId,
+    TextureOptions, Widget,
+};
 use egui_extras::install_image_loaders;
 use image::{DynamicImage, GenericImageView, Pixel, Rgba};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -199,6 +200,7 @@ struct SettingsBuffers {
     closeness_threshold: String,
     output_px_size: String,
     dithering_factor: String,
+    dithering_scale: String,
 }
 
 struct PxlsApp {
@@ -229,7 +231,8 @@ impl PxlsApp {
                 chunks_per_dimension: palette_settings.chunks_per_dimension.to_string(),
                 closeness_threshold: palette_settings.closeness_threshold.to_string(),
                 output_px_size: output_settings.output_px_size.to_string(),
-                dithering_factor: output_settings.dithering_factor.to_string(),
+                dithering_factor: output_settings.dithering_likelihood.to_string(),
+                dithering_scale: output_settings.dithering_scale.to_string(),
             },
             needs_to_refresh_output: false,
             needs_to_refresh_palette: false,
@@ -293,6 +296,8 @@ impl eframe::App for PxlsApp {
                             &mut self.setting_change_buffers.closeness_threshold,
                         );
                     });
+                });
+                ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.label("Virtual Pixel Size: ");
                         ui.text_edit_singleline(&mut self.setting_change_buffers.output_px_size);
@@ -301,6 +306,19 @@ impl eframe::App for PxlsApp {
                         ui.label("Dithering Factor: ");
                         ui.text_edit_singleline(&mut self.setting_change_buffers.dithering_factor);
                     });
+                    ui.horizontal(|ui| {
+                        ui.label("Dithering Scale: ");
+                        ui.text_edit_singleline(&mut self.setting_change_buffers.dithering_scale);
+                    });
+
+                    let old_output_scaling = self.output_settings.scale_output_to_original;
+                    ui.checkbox(
+                        &mut self.output_settings.scale_output_to_original,
+                        "Preserve image size when saving",
+                    );
+                    if old_output_scaling != self.output_settings.scale_output_to_original {
+                        self.needs_to_refresh_output = true;
+                    }
                 });
 
                 if let Ok(new_chunks_per_dimension) =
@@ -328,9 +346,16 @@ impl eframe::App for PxlsApp {
                 if let Ok(new_dithering_factor) =
                     self.setting_change_buffers.dithering_factor.parse()
                 {
-                    if new_dithering_factor != self.output_settings.dithering_factor {
+                    if new_dithering_factor != self.output_settings.dithering_likelihood {
                         self.needs_to_refresh_output = true;
-                        self.output_settings.dithering_factor = new_dithering_factor;
+                        self.output_settings.dithering_likelihood = new_dithering_factor;
+                    }
+                }
+                if let Ok(new_dithering_scale) = self.setting_change_buffers.dithering_scale.parse()
+                {
+                    if new_dithering_scale != self.output_settings.dithering_scale {
+                        self.needs_to_refresh_output = true;
+                        self.output_settings.dithering_scale = new_dithering_scale;
                     }
                 }
 
@@ -389,13 +414,19 @@ impl eframe::App for PxlsApp {
                     ui.label("Creating palette...");
 
                     let (so_far, max) = self.current.last_progress_received;
-                    ProgressBar::new((so_far as f32) / (max as f32)).animate(true).show_percentage().ui(ui);
+                    ProgressBar::new((so_far as f32) / (max as f32))
+                        .animate(true)
+                        .show_percentage()
+                        .ui(ui);
                 }
                 RenderStage::WithPalette => {
                     ui.label("Converting and dithering...");
 
                     let (so_far, max) = self.current.last_progress_received;
-                    ProgressBar::new((so_far as f32) / (max as f32)).animate(true).show_percentage().ui(ui);
+                    ProgressBar::new((so_far as f32) / (max as f32))
+                        .animate(true)
+                        .show_percentage()
+                        .ui(ui);
                 }
                 RenderStage::RenderedImage { input, handle, .. } => {
                     let texture_id = TextureId::from(handle);
@@ -403,7 +434,7 @@ impl eframe::App for PxlsApp {
                     let uv = Rect {
                         min: pos2(0.0, 0.0),
                         max: pos2(1.0, 1.0),
-                    };
+                    }; //TODO: pan & zoom?
 
                     let mut rect = ui.available_rect_before_wrap();
                     {
@@ -421,12 +452,7 @@ impl eframe::App for PxlsApp {
                         rect.max.y = rect.min.y + rect.height() / sf_y;
                     }
 
-                    ui.painter().image(
-                        texture_id,
-                        rect,
-                        uv,
-                        Color32::WHITE,
-                    );
+                    ui.painter().image(texture_id, rect, uv, Color32::WHITE);
                 }
             }
         });

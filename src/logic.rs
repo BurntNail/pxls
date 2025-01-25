@@ -60,6 +60,40 @@ impl DistanceAlgorithm {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct PaletteSettings {
+    pub chunks_per_dimension: u32,
+    pub closeness_threshold: u32,
+}
+
+impl Default for PaletteSettings {
+    fn default() -> Self {
+        Self {
+            chunks_per_dimension: 100,
+            closeness_threshold: 2_500,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct OutputSettings {
+    pub output_px_size: u32,
+    pub dithering_likelihood: u32,
+    pub dithering_scale: u32,
+    pub scale_output_to_original: bool,
+}
+
+impl Default for OutputSettings {
+    fn default() -> Self {
+        Self {
+            output_px_size: 32,
+            dithering_likelihood: 4,
+            dithering_scale: 2,
+            scale_output_to_original: true,
+        }
+    }
+}
+
 //tyvm https://stackoverflow.com/questions/26885198/find-closest-factor-to-a-number-of-a-number
 pub fn get_closest_factor(target: u32, number: u32) -> u32 {
     for i in 0..number {
@@ -74,13 +108,17 @@ pub fn get_closest_factor(target: u32, number: u32) -> u32 {
 
 pub fn get_palette(
     image: &DynamicImage,
-    chunks_per_dimension: u32,
-    closeness_threshold: u32,
+    PaletteSettings {
+        chunks_per_dimension,
+        closeness_threshold,
+    }: PaletteSettings,
     dist_algo: DistanceAlgorithm,
-    progress_sender: Sender<(u32, u32)>,
+    progress_sender: &Sender<(u32, u32)>,
 ) -> Vec<Rgba<u8>> {
-    let chunks_per_dimension = get_closest_factor(chunks_per_dimension, image.width().min(image.height()));
-    let closeness_threshold = get_closest_factor(closeness_threshold, image.width().min(image.height()));
+    let chunks_per_dimension =
+        get_closest_factor(chunks_per_dimension, image.width().min(image.height()));
+    let closeness_threshold =
+        get_closest_factor(closeness_threshold, image.width().min(image.height()));
 
     let (width, height) = image.dimensions();
     let chunks_per_dimension = chunks_per_dimension.min(width).min(height);
@@ -128,19 +166,26 @@ pub fn dither_palette(
     input: &DynamicImage,
     palette: &[Rgba<u8>],
     distance_algorithm: DistanceAlgorithm,
-    output_px_size: u32,
-    dithering_factor: u32,
-    progress_sender: Sender<(u32, u32)>,
+    OutputSettings {
+        output_px_size,
+        dithering_likelihood,
+        dithering_scale,
+        scale_output_to_original: output_img_scaling,
+    }: OutputSettings,
+    progress_sender: &Sender<(u32, u32)>,
 ) -> DynamicImage {
     let output_px_size = get_closest_factor(output_px_size, input.height());
 
     let (width, height) = input.dimensions();
 
     let (num_width_chunks, num_height_chunks) = (width / output_px_size, height / output_px_size);
-    let (output_w, output_h) = if dithering_factor == 1 {
+    let (output_w, output_h) = if dithering_likelihood == 1 {
         (num_width_chunks, num_height_chunks)
     } else {
-        (num_width_chunks * 4, num_height_chunks * 4)
+        (
+            num_width_chunks * dithering_scale,
+            num_height_chunks * dithering_scale,
+        )
     };
     let mut output = DynamicImage::new(output_w, output_h, ColorType::Rgb8);
 
@@ -191,7 +236,7 @@ pub fn dither_palette(
                 let inter_candidate_distance = distance_algorithm.distance(first, second);
 
                 if first_distance.abs_diff(second_distance)
-                    > (inter_candidate_distance / dithering_factor)
+                    > (inter_candidate_distance / dithering_likelihood)
                 {
                     (first, first)
                 } else {
@@ -199,23 +244,22 @@ pub fn dither_palette(
                 }
             };
 
-            for px_x in (4 * chunk_x)..(4 * (chunk_x + 1)) {
-                for px_y in (4 * chunk_y)..(4 * (chunk_y + 1)) {
-                    if output_px_size == 1 || dithering_factor == 1 {
+            if dithering_scale == 1 || dithering_likelihood == 1 {
+                for px_x in (dithering_scale * chunk_x)..(dithering_scale * (chunk_x + 1)) {
+                    for px_y in (dithering_scale * chunk_y)..(dithering_scale * (chunk_y + 1)) {
                         output.put_pixel(px_x, px_y, first);
-                    } else {
-                        let mut should_dither = (px_y % 4) < 2;
-
-                        if (px_x % 4) < 2 {
-                            should_dither = !should_dither;
-                        }
-
-                        if should_dither {
-                            output.put_pixel(px_x, px_y, first);
-                        } else {
-                            output.put_pixel(px_x, px_y, second);
-                        }
                     }
+                }
+            }
+
+            for px_x in (dithering_scale * chunk_x)..(dithering_scale * (chunk_x + 1)) {
+                for px_y in (dithering_scale * chunk_y)..(dithering_scale * (chunk_y + 1)) {
+                    let mut should_dither = px_y % 2 == 0;
+                    if px_x % 2 == 0 {
+                        should_dither = !should_dither;
+                    }
+
+                    output.put_pixel(px_x, px_y, if should_dither { first } else { second });
                 }
             }
 
@@ -224,5 +268,35 @@ pub fn dither_palette(
         }
     }
 
-    output
+    if !output_img_scaling {
+        return output;
+    }
+
+    //yes this is the lazy way of doing things
+    //compared to doing it in the above loop
+    //but
+    //this logic is vastly simpler
+    //and it's not like it takes that long
+    let scaling_factor = if dithering_likelihood == 1 || dithering_scale == 1 {
+        output_px_size
+    } else {
+        output_px_size / dithering_scale
+    };
+
+    let (final_w, final_h) = (output_w * scaling_factor, output_h * scaling_factor);
+    let mut final_img = DynamicImage::new(final_w, final_h, ColorType::Rgb8);
+
+    for x in 0..output_w {
+        for y in 0..output_h {
+            let px = output.get_pixel(x, y);
+
+            for px_x in (scaling_factor * x)..(scaling_factor * (x + 1)) {
+                for px_y in (scaling_factor * y)..(scaling_factor * (y + 1)) {
+                    final_img.put_pixel(px_x, px_y, px);
+                }
+            }
+        }
+    }
+
+    final_img
 }

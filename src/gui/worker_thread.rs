@@ -1,4 +1,6 @@
-use crate::logic::{dither_palette, get_palette, DistanceAlgorithm};
+use crate::logic::{
+    dither_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings,
+};
 use image::{DynamicImage, ImageReader, Rgba};
 use rfd::FileDialog;
 use std::env::current_dir;
@@ -6,36 +8,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-
-#[derive(Copy, Clone, Debug)]
-pub struct PaletteSettings {
-    pub chunks_per_dimension: u32,
-    pub closeness_threshold: u32,
-}
-
-impl Default for PaletteSettings {
-    fn default() -> Self {
-        Self {
-            chunks_per_dimension: 100,
-            closeness_threshold: 2_500,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct OutputSettings {
-    pub output_px_size: u32,
-    pub dithering_factor: u32,
-}
-
-impl Default for OutputSettings {
-    fn default() -> Self {
-        Self {
-            output_px_size: 32,
-            dithering_factor: 4,
-        }
-    }
-}
 
 pub enum ThreadRequest {
     GetFile,
@@ -62,6 +34,7 @@ pub enum ThreadResult {
     },
 }
 
+#[allow(clippy::type_complexity)]
 pub fn start_worker_thread() -> (
     JoinHandle<()>,
     Sender<ThreadRequest>,
@@ -108,13 +81,8 @@ pub fn start_worker_thread() -> (
                     palette_settings,
                     distance_algorithm,
                 } => {
-                    let palette = get_palette(
-                        &input,
-                        palette_settings.chunks_per_dimension,
-                        palette_settings.closeness_threshold,
-                        distance_algorithm,
-                        prog_tx.clone(),
-                    );
+                    let palette =
+                        get_palette(&input, palette_settings, distance_algorithm, &prog_tx);
 
                     res_tx
                         .send(ThreadResult::RenderedPalette(input, palette))
@@ -130,9 +98,8 @@ pub fn start_worker_thread() -> (
                         &input,
                         &palette,
                         distance_algorithm,
-                        output_settings.output_px_size,
-                        output_settings.dithering_factor,
-                        prog_tx.clone(),
+                        output_settings,
+                        &prog_tx,
                     );
 
                     res_tx

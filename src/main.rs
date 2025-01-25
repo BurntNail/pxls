@@ -14,9 +14,6 @@ mod cli;
 mod gui;
 mod logic;
 
-//TODO: dither scale factor
-//TODO: output image scaling
-
 fn main() {
     let args: Vec<String> = args().skip(1).collect();
     if args.is_empty() {
@@ -26,7 +23,7 @@ fn main() {
         if args.len() == 1 {
             let first = args[0].to_lowercase();
             if ["--help", "-help", "-h", "--h", "help", "h", "?", "-?"].contains(&first.as_str()) {
-                eprintln!("usage: pxls [input_file] [chunks_per_dimension] [closeness_threshold] [distance_algo] [output_file] [output_virtual_pixel_size] [dithering_factor]\nor usage: pxls ask");
+                eprintln!("usage: pxls [input_file] [chunks_per_dimension] [closeness_threshold] [distance_algo] [output_file] [output_virtual_pixel_size] [dithering_factor] [dithering_scale]\nor usage: pxls ask");
                 std::process::exit(1);
             } else if ["a", "-a", "--a", "ask", "-ask", "--ask"].contains(&first.as_str()) {
                 should_ask = true;
