@@ -48,7 +48,6 @@ struct PhotoBeingEdited {
     requests_tx: Sender<ThreadRequest>,
     results_rx: Receiver<ThreadResult>,
     texture_options: TextureOptions,
-    output_file_name: String,
 }
 
 impl PhotoBeingEdited {
@@ -65,13 +64,16 @@ impl PhotoBeingEdited {
             results_rx,
             worker_should_stop,
             texture_options: TextureOptions::NEAREST,
-            output_file_name: "output.jpg".to_string(),
         }
     }
 
-    pub fn pick_new_file(&mut self) {
-        self.requests_tx.send(ThreadRequest::GetFile).unwrap();
+    pub fn pick_new_input(&mut self) {
+        self.requests_tx.send(ThreadRequest::GetInputImage).unwrap();
         self.stage = RenderStage::Nothing;
+    }
+
+    pub fn save_file (&self) {
+        self.requests_tx.send(ThreadRequest::GetOutputImage).unwrap();
     }
 
     pub fn process_thread_updates(
@@ -124,6 +126,13 @@ impl PhotoBeingEdited {
                         handle,
                     };
                     self.last_progress_received = (0, 1);
+                }
+                ThreadResult::GotDestination(dst) => {
+                    if let RenderStage::RenderedImage {output, ..} = &self.stage {
+                        if let Err(e) = output.save(dst) {
+                            eprintln!("Error saving file: {e:?}");
+                        }
+                    }
                 }
             }
         }
@@ -258,7 +267,7 @@ impl eframe::App for PxlsApp {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     if ui.button("Select File").clicked() {
-                        self.current.pick_new_file();
+                        self.current.pick_new_input();
                     }
 
                     ui.checkbox(&mut self.auto_update, "Auto-Update");
@@ -386,18 +395,11 @@ impl eframe::App for PxlsApp {
             });
         });
 
-        if let RenderStage::RenderedImage { output, .. } = &self.current.stage {
+        if let RenderStage::RenderedImage { .. } = &self.current.stage {
             egui::TopBottomPanel::new(TopBottomSide::Bottom, "bottom-panel").show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Output File Name: ");
-                    ui.text_edit_singleline(&mut self.current.output_file_name);
-
-                    ui.separator();
-
                     if ui.button("Save").clicked() {
-                        if let Err(e) = output.save(&self.current.output_file_name) {
-                            eprintln!("Error saving file: {e:?}");
-                        }
+                        self.current.save_file();
                     }
                 })
             });

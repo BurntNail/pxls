@@ -4,13 +4,15 @@ use crate::logic::{
 use image::{DynamicImage, ImageReader, Rgba};
 use rfd::FileDialog;
 use std::env::current_dir;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
 pub enum ThreadRequest {
-    GetFile,
+    GetInputImage,
+    GetOutputImage,
     RenderPalette {
         input: DynamicImage,
         palette_settings: PaletteSettings,
@@ -26,6 +28,7 @@ pub enum ThreadRequest {
 
 pub enum ThreadResult {
     ReadInFile(DynamicImage),
+    GotDestination(PathBuf),
     RenderedPalette(DynamicImage, Vec<Rgba<u8>>),
     RenderedImage {
         input: DynamicImage,
@@ -55,7 +58,7 @@ pub fn start_worker_thread() -> (
 
         for req in req_rx.try_iter() {
             match req {
-                ThreadRequest::GetFile => {
+                ThreadRequest::GetInputImage => {
                     if let Some(file) = FileDialog::new()
                         .set_directory(current_dir().unwrap_or_else(|_| "/".into()))
                         .pick_file()
@@ -108,6 +111,14 @@ pub fn start_worker_thread() -> (
                             output,
                         })
                         .unwrap();
+                },
+                ThreadRequest::GetOutputImage => {
+                    if let Some(file) = FileDialog::new()
+                        .add_filter("Image Files", &["png", "jpg"])
+                        .set_directory(current_dir().unwrap_or_else(|_| "/".into()))
+                        .save_file() {
+                        res_tx.send(ThreadResult::GotDestination(file)).unwrap();
+                    }
                 }
             }
         }

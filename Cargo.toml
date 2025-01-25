@@ -10,7 +10,6 @@ eframe = "0.30.0"
 egui = "0.30.0"
 egui_extras = { version = "0.30.0", features = ["image"] }
 image = { version = "0.25.5", features = ["jpeg"] }
-indicatif = "0.17.9"
 rfd = "0.15.2"
 
 # [profile.release]
