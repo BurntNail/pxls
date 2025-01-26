@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use image::{ColorType, DynamicImage, GenericImage, GenericImageView, Pixel, Rgba};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -153,9 +154,11 @@ pub fn get_palette(
     let (width_chunk_size, height_chunk_size) =
         (image.width() / chunks_per_dimension, image.height() / chunks_per_dimension);
 
-    let max_num_colours = chunks_per_dimension * chunks_per_dimension;
+    let num_chunks = chunks_per_dimension * chunks_per_dimension;
     let mut progress_bar = 0;
-    let mut av_px_colours = Vec::with_capacity(max_num_colours as usize);
+
+    let mut av_px_colours = Vec::with_capacity(num_chunks as usize);
+    let mut cache = HashMap::new();
 
     for chunk_x in 0..chunks_per_dimension {
         for chunk_y in 0..chunks_per_dimension {
@@ -168,13 +171,22 @@ pub fn get_palette(
                 for px_y in (height_chunk_size * chunk_y)..(height_chunk_size * (chunk_y + 1)) {
                     let px = image.get_pixel(px_x, px_y);
 
-                    let mut too_close = false;
-                    for so_far in av_px_colours.iter().copied() {
-                        if dist_algo.distance(px, so_far) < dist_algo.standardise_closeness_threshold(closeness_threshold) {
-                            too_close = true;
-                            break;
+                    let too_close = match cache.entry(px) {
+                        Entry::Occupied(occ) => *occ.get(),
+                        Entry::Vacant(vac) => {
+                            let mut too_close = false;
+                            for so_far in av_px_colours.iter().copied() {
+                                if dist_algo.distance(px, so_far) < dist_algo.standardise_closeness_threshold(closeness_threshold) {
+                                    too_close = true;
+                                    break;
+                                }
+                            }
+
+                            *vac.insert(too_close)
                         }
-                    }
+                    };
+
+
 
                     if !too_close {
                         *map.entry(px).or_default() += 1;
@@ -184,10 +196,11 @@ pub fn get_palette(
 
             if let Some((most_common, _)) = map.into_iter().max_by_key(|(_, count)| *count) {
                 av_px_colours.push(most_common);
+                cache.clear();
             }
 
             progress_bar += 1;
-            let _ = progress_sender.send((progress_bar, max_num_colours));
+            let _ = progress_sender.send((progress_bar, num_chunks));
         }
     }
 
