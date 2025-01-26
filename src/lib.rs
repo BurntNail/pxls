@@ -48,11 +48,11 @@ impl DistanceAlgorithm {
             Rgba([r, g, b, _]): Rgba<u8>,
             Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
         ) -> u32 {
-            let delta_r = r.abs_diff(cmp_r);
-            let delta_g = g.abs_diff(cmp_g);
-            let delta_b = b.abs_diff(cmp_b);
+            let delta_r = r.abs_diff(cmp_r) as u32;
+            let delta_g = g.abs_diff(cmp_g) as u32;
+            let delta_b = b.abs_diff(cmp_b) as u32;
 
-            (delta_r as u32).pow(2) + (delta_g as u32).pow(2) + (delta_b as u32).pow(2)
+            delta_r.pow(2) + delta_g.pow(2) + delta_b.pow(2)
         }
 
         #[inline]
@@ -60,11 +60,11 @@ impl DistanceAlgorithm {
             Rgba([r, g, b, _]): Rgba<u8>,
             Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
         ) -> u32 {
-            let delta_r = r.abs_diff(cmp_r);
-            let delta_g = g.abs_diff(cmp_g);
-            let delta_b = b.abs_diff(cmp_b);
+            let delta_r = r.abs_diff(cmp_r) as u32;
+            let delta_g = g.abs_diff(cmp_g) as u32;
+            let delta_b = b.abs_diff(cmp_b) as u32;
 
-            delta_r as u32 + delta_g as u32 + delta_b as u32
+            delta_r + delta_g + delta_b
         }
 
         #[inline]
@@ -119,7 +119,7 @@ pub struct OutputSettings {
 impl Default for OutputSettings {
     fn default() -> Self {
         Self {
-            output_px_size: 32,
+            output_px_size: 5,
             dithering_likelihood: 4,
             dithering_scale: 2,
             scale_output_to_original: true,
@@ -166,7 +166,7 @@ pub fn get_palette(
                 return av_px_colours;
             }
 
-            let mut map: HashMap<_, u32> = HashMap::new();
+            let mut occurencces_of_suitably_far: HashMap<_, u32> = HashMap::new();
             for px_x in (width_chunk_size * chunk_x)..(width_chunk_size * (chunk_x + 1)) {
                 for px_y in (height_chunk_size * chunk_y)..(height_chunk_size * (chunk_y + 1)) {
                     let px = image.get_pixel(px_x, px_y);
@@ -186,15 +186,13 @@ pub fn get_palette(
                         }
                     };
 
-
-
                     if !too_close {
-                        *map.entry(px).or_default() += 1;
+                        *occurencces_of_suitably_far.entry(px).or_default() += 1;
                     }
                 }
             }
 
-            if let Some((most_common, _)) = map.into_iter().max_by_key(|(_, count)| *count) {
+            if let Some((most_common, _)) = occurencces_of_suitably_far.into_iter().max_by_key(|(_, count)| *count) {
                 av_px_colours.push(most_common);
                 cache.clear();
             }
@@ -220,7 +218,7 @@ pub fn dither_palette(
     progress_sender: &Sender<(u32, u32)>,
     stop: Arc<AtomicBool>,
 ) -> DynamicImage {
-    let output_px_size = get_closest_factor(output_px_size, input.height());
+    let output_px_size = get_closest_factor(1 << (output_px_size - 1), input.width());
 
     let (width, height) = input.dimensions();
 
@@ -291,6 +289,7 @@ pub fn dither_palette(
                 let second = second.unwrap();
                 let inter_candidate_distance = distance_algorithm.distance(first, second);
 
+                //TODO: make DL more ergonomic and easier to understand
                 if first_distance.abs_diff(second_distance)
                     > (inter_candidate_distance / dithering_likelihood)
                 {

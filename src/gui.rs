@@ -2,16 +2,15 @@ use crate::gui::worker_thread::{start_worker_thread, ThreadRequest, ThreadResult
 use pxls::{DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
 use eframe::{CreationContext, Frame, NativeOptions};
 use egui::panel::TopBottomSide;
-use egui::{
-    pos2, Color32, ColorImage, Context, ProgressBar, Rect, TextureHandle, TextureId,
-    TextureOptions, Widget,
-};
+use egui::{pos2, Color32, ColorImage, Context, ProgressBar, Rect, Slider, TextureHandle, TextureId, TextureOptions, Widget};
 use egui_extras::install_image_loaders;
 use image::{DynamicImage, GenericImageView, Pixel, Rgba};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
+
+//TODO: preserve history and previous images
 
 mod worker_thread;
 
@@ -208,9 +207,7 @@ impl PhotoBeingEdited {
 struct SettingsBuffers {
     chunks_per_dimension: String,
     closeness_threshold: String,
-    output_px_size: String,
     dithering_factor: String,
-    dithering_scale: String,
 }
 
 struct PxlsApp {
@@ -240,9 +237,7 @@ impl PxlsApp {
             setting_change_buffers: SettingsBuffers {
                 chunks_per_dimension: palette_settings.chunks_per_dimension.to_string(),
                 closeness_threshold: palette_settings.closeness_threshold.to_string(),
-                output_px_size: output_settings.output_px_size.to_string(),
                 dithering_factor: output_settings.dithering_likelihood.to_string(),
-                dithering_scale: output_settings.dithering_scale.to_string(),
             },
             needs_to_refresh_output: false,
             needs_to_refresh_palette: false,
@@ -335,7 +330,16 @@ impl eframe::App for PxlsApp {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.label("Virtual Pixel Size: ");
-                        ui.text_edit_singleline(&mut self.setting_change_buffers.output_px_size);
+
+                        let old_px_size = self.output_settings.output_px_size;
+
+                        //make sure we don't get images that are too big to display. this is a pretty lazy solution, but i also can't see an alternative because we might not have an image yet lol
+                        let min = self.output_settings.dithering_scale.ilog2() + 1;
+                        ui.add(Slider::new(&mut self.output_settings.output_px_size, min..=10));
+
+                        if old_px_size != self.output_settings.output_px_size {
+                            self.needs_to_refresh_output = true;
+                        }
                     });
                     ui.horizontal(|ui| {
                         ui.label("Dithering Factor: ");
@@ -343,7 +347,14 @@ impl eframe::App for PxlsApp {
                     });
                     ui.horizontal(|ui| {
                         ui.label("Dithering Scale: ");
-                        ui.text_edit_singleline(&mut self.setting_change_buffers.dithering_scale);
+
+                        let old_ds = self.output_settings.dithering_scale;
+                        ui.add(Slider::new(&mut self.output_settings.dithering_scale, 1..=4));
+
+                        if old_ds != self.output_settings.dithering_scale {
+                            self.needs_to_refresh_output = true;
+                            self.output_settings.output_px_size = (self.output_settings.dithering_scale.ilog2() + 1).max(self.output_settings.output_px_size);
+                        }
                     });
 
                     let old_output_scaling = self.output_settings.scale_output_to_original;
@@ -372,25 +383,12 @@ impl eframe::App for PxlsApp {
                         self.palette_settings.closeness_threshold = new_closeness_threshold;
                     }
                 }
-                if let Ok(new_output_px_size) = self.setting_change_buffers.output_px_size.parse() {
-                    if new_output_px_size != self.output_settings.output_px_size {
-                        self.needs_to_refresh_output = true;
-                        self.output_settings.output_px_size = new_output_px_size;
-                    }
-                }
                 if let Ok(new_dithering_factor) =
                     self.setting_change_buffers.dithering_factor.parse()
                 {
                     if new_dithering_factor != self.output_settings.dithering_likelihood {
                         self.needs_to_refresh_output = true;
                         self.output_settings.dithering_likelihood = new_dithering_factor;
-                    }
-                }
-                if let Ok(new_dithering_scale) = self.setting_change_buffers.dithering_scale.parse()
-                {
-                    if new_dithering_scale != self.output_settings.dithering_scale {
-                        self.needs_to_refresh_output = true;
-                        self.output_settings.dithering_scale = new_dithering_scale;
                     }
                 }
             });
