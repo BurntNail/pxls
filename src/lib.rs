@@ -295,7 +295,7 @@ pub fn dither_palette(
                         should_dither = !should_dither;
                     }
 
-                    should_dither |= dithering_scale > 1;
+                    should_dither &= dithering_scale > 1;
 
                     output.put_pixel(px_x, px_y, if should_dither { first } else { second });
                 }
