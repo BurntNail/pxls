@@ -10,4 +10,4 @@ flamegraph --image-width 2500 -- ./target/release/pxls ./album.jpg 100 15 euclid
 xdg-open ./flamegraph.svg
 
 
-hyperfine "./target/release/pxls ./album.jpg 100 15 euclidean output.jpg 32 4 2" #about 12.1s
+hyperfine "./target/release/pxls ./album.jpg 100 15 euclidean output.jpg 32 4 2" #about 5.1s

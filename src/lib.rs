@@ -251,35 +251,42 @@ pub fn dither_palette(
                 u8::MAX,
             ]);
 
-            let distances: HashMap<_, _> = palette
-                .iter()
-                .copied()
-                .map(|x| (x, distance_algorithm.distance(x, av_px)))
-                .collect();
+            let mut first = None;
+            let mut first_distance = u32::MAX;
+            let mut second = None;
+            let mut second_distance = u32::MAX;
 
-            let mut cloned_palette = palette.to_vec();
-            cloned_palette.sort_by_key(|rgb| distances[rgb]);
+            for px in palette.iter().copied() {
+                let dist = distance_algorithm.distance(px, av_px);
 
-            let (first, second) = if cloned_palette.len() == 1 || dithering_scale == 1 {
-                let first = cloned_palette.remove(0);
-                (first, first)
+                if dist < first_distance {
+                    second = first;
+                    second_distance = first_distance;
+
+                    first = Some(px);
+                    first_distance = dist;
+                } else if dist < second_distance {
+                    second = Some(px);
+                    second_distance = dist;
+                }
+            }
+
+            let first = first.unwrap();
+            let second = if second.is_none() || dithering_scale == 1 {
+                first
             } else {
-                let second = cloned_palette.swap_remove(1).to_rgba();
-                let first = cloned_palette.swap_remove(0).to_rgba();
-
-                let first_distance = distances[&first];
-                let second_distance = distances[&second];
-
+                let second = second.unwrap();
                 let inter_candidate_distance = distance_algorithm.distance(first, second);
 
                 if first_distance.abs_diff(second_distance)
                     > (inter_candidate_distance / dithering_likelihood)
                 {
-                    (first, first)
+                    first
                 } else {
-                    (first, second)
+                    second
                 }
             };
+
 
             for px_x in (dithering_scale * chunk_x)..(dithering_scale * (chunk_x + 1)) {
                 for px_y in (dithering_scale * chunk_y)..(dithering_scale * (chunk_y + 1)) {
