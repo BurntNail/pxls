@@ -52,7 +52,7 @@ pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
             output_px_size,
             dithering_likelihood: dithering_factor,
             dithering_scale,
-            scale_output_to_original: false, //TODO: consider making this an option...
+            scale_output_to_original: true, //TODO: consider making this an option...
         },
         &tx,
         should_stop.clone()
@@ -62,11 +62,6 @@ pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
     println!("Output image generated");
 
     output_img.save(&output)?;
-
-    #[cfg(target_os = "linux")]
-    {
-        Command::new("xdg-open").arg(output).spawn()?;
-    }
 
     Ok(())
 }

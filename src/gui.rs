@@ -181,6 +181,7 @@ impl PhotoBeingEdited {
         }
     }
 
+    #[inline]
     pub const fn is_ready_for_more_input(&self) -> bool {
         matches!(
             self.stage,
