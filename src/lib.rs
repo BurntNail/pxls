@@ -10,8 +10,10 @@ use std::sync::Arc;
 pub enum DistanceAlgorithm {
     Euclidean,
     Manhattan,
-    ProductDifference,
+    Product,
     Brightness,
+    Luminance,
+    SlowLuminance,
 }
 
 impl DistanceAlgorithm {
@@ -19,15 +21,17 @@ impl DistanceAlgorithm {
         match self {
             Self::Euclidean => "Euclidean",
             Self::Manhattan => "Manhattan",
-            Self::ProductDifference => "Product Difference",
+            Self::Product => "Product",
             Self::Brightness => "Brightness",
+            Self::Luminance => "Luminance",
+            Self::SlowLuminance => "SlowLuminance",
         }
     }
 
     pub const fn standardise_closeness_threshold(self, n: u32) -> u32 {
         match self {
-            Self::Euclidean | Self::ProductDifference => n * n,
-            Self::Manhattan | Self::Brightness => n,
+            Self::Euclidean | Self::Product => n * n,
+            Self::Manhattan | Self::Brightness | Self::Luminance | Self::SlowLuminance => n,
         }
     }
 }
@@ -41,8 +45,10 @@ impl Display for DistanceAlgorithm {
 pub const ALL_ALGOS: &[DistanceAlgorithm] = &[
     DistanceAlgorithm::Euclidean,
     DistanceAlgorithm::Manhattan,
-    DistanceAlgorithm::ProductDifference,
+    DistanceAlgorithm::Product,
     DistanceAlgorithm::Brightness,
+    DistanceAlgorithm::Luminance,
+    DistanceAlgorithm::SlowLuminance
 ];
 
 impl DistanceAlgorithm {
@@ -79,6 +85,29 @@ impl DistanceAlgorithm {
             (r as u32 * g as u32 * b as u32).abs_diff(cmp_r as u32 * cmp_g as u32 * cmp_b as u32)
         }
 
+        // https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color :)
+        #[inline]
+        const fn luminance(
+            Rgba([r, g, b, _]): Rgba<u8>,
+            Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
+        ) -> u32 {
+            let lum_a = ((r as u32) * 1063 / 5000) + ((g as u32) * 447 / 625) + ((b as u32) * 361 / 5000);
+            let lum_b = ((cmp_r as u32) * 1063 / 5000) + ((cmp_g as u32) * 447 / 625) + ((cmp_b as u32) * 361 / 5000);
+
+            lum_a.abs_diff(lum_b)
+        }
+
+        #[inline]
+        const fn slow_luminance(
+            Rgba([r, g, b, _]): Rgba<u8>,
+            Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
+        ) -> u32 {
+            let lum_a = ((r as u32).pow(2) * 299 / 1000) + ((g as u32).pow(2) * 587 / 1000) + ((b as u32).pow(2) * 57 / 500);
+            let lum_b = ((cmp_r as u32).pow(2) * 299 / 1000) + ((cmp_g as u32).pow(2) * 587 / 1000) + ((cmp_b as u32).pow(2) * 57 / 500);
+
+            (lum_a.isqrt()).abs_diff(lum_b.isqrt())
+        }
+
         #[inline]
         const fn brightness(
             Rgba([r, g, b, _]): Rgba<u8>,
@@ -91,8 +120,10 @@ impl DistanceAlgorithm {
         match self {
             Self::Euclidean => euclidean_distance(a, b),
             Self::Manhattan => manhattan_distance(a, b),
-            Self::ProductDifference => product_difference(a, b),
+            Self::Product => product_difference(a, b),
             Self::Brightness => brightness(a, b),
+            Self::Luminance => luminance(a, b),
+            Self::SlowLuminance => slow_luminance(a, b),
         }
     }
 }
