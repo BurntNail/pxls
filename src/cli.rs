@@ -1,6 +1,4 @@
-use pxls::{
-    dither_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings,
-};
+use pxls::{dither_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
 use anyhow::anyhow;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{FuzzySelect, Input};
@@ -10,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::channel;
+use std::collections::HashMap;
 
 #[allow(dead_code)]
 pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
@@ -109,12 +108,14 @@ impl CliArgs {
             eprintln!("[closeness_threshold] must be a valid u32");
             return None;
         };
-        let algorithm = match algorithm.to_lowercase().as_str() {
-            "euclidean" => DistanceAlgorithm::Euclidean,
-            "manhattan" => DistanceAlgorithm::Manhattan,
-            _ => {
-                eprintln!("[distance_algo] must be either `euclidean` or `manhattan`");
-                return None;
+        let algorithm = {
+            let possibilities: HashMap<_, _> = ALL_ALGOS.into_iter().copied().map(|algo| (algo.to_str().to_lowercase(), algo)).collect();
+            match possibilities.get(algorithm.to_lowercase().as_str()) {
+                Some(x) => *x,
+                None => {
+                    eprintln!("[distance_algo] must be valid");
+                    return None;
+                }
             }
         };
 
