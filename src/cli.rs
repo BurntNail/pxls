@@ -1,14 +1,16 @@
-use pxls::{dither_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
 use anyhow::anyhow;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{FuzzySelect, Input};
 use image::ImageReader;
+use pxls::{
+    dither_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS,
+};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::channel;
-use std::collections::HashMap;
+use std::sync::Arc;
 
 #[allow(dead_code)]
 pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
@@ -38,7 +40,7 @@ pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
         },
         algorithm,
         &tx,
-        should_stop.clone()
+        should_stop.clone(),
     );
     println!("Palette generated with {} colours", av_px_colours.len());
     println!("Converting image to palette & shrinking");
@@ -53,7 +55,7 @@ pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
             scale_output_to_original: true, //TODO: consider making this an option...
         },
         &tx,
-        should_stop.clone()
+        should_stop,
     );
     //TODO: maybe the CLI should get fewer options when coming from env
     //TODO: opinionated defaults?
@@ -109,13 +111,16 @@ impl CliArgs {
             return None;
         };
         let algorithm = {
-            let possibilities: HashMap<_, _> = ALL_ALGOS.into_iter().copied().map(|algo| (algo.to_str().to_lowercase(), algo)).collect();
-            match possibilities.get(algorithm.to_lowercase().as_str()) {
-                Some(x) => *x,
-                None => {
-                    eprintln!("[distance_algo] must be valid");
-                    return None;
-                }
+            let possibilities: HashMap<_, _> = ALL_ALGOS
+                .iter()
+                .copied()
+                .map(|algo| (algo.to_str().to_lowercase(), algo))
+                .collect();
+            if let Some(x) = possibilities.get(algorithm.to_lowercase().as_str()) {
+                *x
+            } else {
+                eprintln!("[distance_algo] must be valid");
+                return None;
             }
         };
 

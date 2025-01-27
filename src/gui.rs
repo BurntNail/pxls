@@ -1,10 +1,13 @@
 use crate::gui::worker_thread::{start_worker_thread, ThreadRequest, ThreadResult};
-use pxls::{DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
 use eframe::{CreationContext, Frame, NativeOptions};
 use egui::panel::TopBottomSide;
-use egui::{pos2, Color32, ColorImage, Context, ProgressBar, Rect, Slider, TextureHandle, TextureId, TextureOptions, Widget};
+use egui::{
+    pos2, Color32, ColorImage, Context, ProgressBar, Rect, Slider, TextureHandle, TextureId,
+    TextureOptions, Widget,
+};
 use egui_extras::install_image_loaders;
 use image::{DynamicImage, GenericImageView, Pixel, Rgba};
+use pxls::{DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
@@ -74,8 +77,10 @@ impl PhotoBeingEdited {
         self.stage = RenderStage::Nothing;
     }
 
-    pub fn save_file (&self, index: usize) {
-        self.requests_tx.send(ThreadRequest::GetOutputImage(index)).unwrap();
+    pub fn save_file(&self, index: usize) {
+        self.requests_tx
+            .send(ThreadRequest::GetOutputImage(index))
+            .unwrap();
     }
 
     pub fn process_thread_updates(
@@ -299,7 +304,6 @@ impl eframe::App for PxlsApp {
                             self.needs_to_refresh_output = false;
                         }
                     }
-
                 });
 
                 ui.vertical(|ui| {
@@ -343,7 +347,10 @@ impl eframe::App for PxlsApp {
 
                         //make sure we don't get images that are too big to display. this is a pretty lazy solution, but i also can't see an alternative because we might not have an image yet lol
                         let min = self.output_settings.dithering_scale.ilog2() + 1;
-                        ui.add(Slider::new(&mut self.output_settings.output_px_size, min..=10));
+                        ui.add(Slider::new(
+                            &mut self.output_settings.output_px_size,
+                            min..=10,
+                        ));
 
                         if old_px_size != self.output_settings.output_px_size {
                             self.needs_to_refresh_output = true;
@@ -357,11 +364,16 @@ impl eframe::App for PxlsApp {
                         ui.label("Dithering Scale: ");
 
                         let old_ds = self.output_settings.dithering_scale;
-                        ui.add(Slider::new(&mut self.output_settings.dithering_scale, 1..=4));
+                        ui.add(Slider::new(
+                            &mut self.output_settings.dithering_scale,
+                            1..=4,
+                        ));
 
                         if old_ds != self.output_settings.dithering_scale {
                             self.needs_to_refresh_output = true;
-                            self.output_settings.output_px_size = (self.output_settings.dithering_scale.ilog2() + 1).max(self.output_settings.output_px_size);
+                            self.output_settings.output_px_size =
+                                (self.output_settings.dithering_scale.ilog2() + 1)
+                                    .max(self.output_settings.output_px_size);
                         }
                     });
 
@@ -402,15 +414,17 @@ impl eframe::App for PxlsApp {
             });
         });
 
-
-
         if matches!(self.current.stage, RenderStage::RenderedImage(_)) {
             egui::TopBottomPanel::new(TopBottomSide::Bottom, "bottom-panel").show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     //have to do the weird ifs for mutability reasons
                     if let RenderStage::RenderedImage(index) = &mut self.current.stage {
                         ui.label("History: ");
-                        ui.add(Slider::new(index, 0..=(self.current.image_history.len() - 1)));
+                        #[allow(clippy::range_minus_one)] //😔
+                        ui.add(Slider::new(
+                            index,
+                            0..=(self.current.image_history.len() - 1),
+                        ));
                     }
 
                     ui.separator();
@@ -451,7 +465,10 @@ impl eframe::App for PxlsApp {
                 }
                 RenderStage::RenderedImage(index) => {
                     let RenderedImage {
-                        input: _, output, handle, palette: _
+                        input: _,
+                        output,
+                        handle,
+                        palette: _,
                     } = &self.current.image_history[*index];
 
                     let texture_id = TextureId::from(handle);
@@ -463,7 +480,8 @@ impl eframe::App for PxlsApp {
 
                     let mut rect = ui.available_rect_before_wrap();
                     {
-                        let (img_width, img_height) = (output.width() as f32, output.height() as f32);
+                        let (img_width, img_height) =
+                            (output.width() as f32, output.height() as f32);
                         let img_aspect = img_width / img_height;
                         let available_aspect = rect.width() / rect.height();
 

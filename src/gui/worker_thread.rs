@@ -1,7 +1,5 @@
-use pxls::{
-    dither_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings,
-};
 use image::{DynamicImage, ImageReader, Rgba};
+use pxls::{dither_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings};
 use rfd::FileDialog;
 use std::env::current_dir;
 use std::path::PathBuf;
@@ -83,8 +81,13 @@ pub fn start_worker_thread() -> (
                     palette_settings,
                     distance_algorithm,
                 } => {
-                    let palette =
-                        get_palette(&input, palette_settings, distance_algorithm, &prog_tx, should_stop.clone());
+                    let palette = get_palette(
+                        &input,
+                        palette_settings,
+                        distance_algorithm,
+                        &prog_tx,
+                        should_stop.clone(),
+                    );
 
                     res_tx
                         .send(ThreadResult::RenderedPalette(input, palette))
@@ -102,7 +105,7 @@ pub fn start_worker_thread() -> (
                         distance_algorithm,
                         output_settings,
                         &prog_tx,
-                        should_stop.clone()
+                        should_stop.clone(),
                     );
 
                     res_tx
@@ -112,13 +115,16 @@ pub fn start_worker_thread() -> (
                             output,
                         })
                         .unwrap();
-                },
+                }
                 ThreadRequest::GetOutputImage(index) => {
                     if let Some(file) = FileDialog::new()
                         .add_filter("Image Files", &["png", "jpg"])
                         .set_directory(current_dir().unwrap_or_else(|_| "/".into()))
-                        .save_file() {
-                        res_tx.send(ThreadResult::GotDestination(file, index)).unwrap();
+                        .save_file()
+                    {
+                        res_tx
+                            .send(ThreadResult::GotDestination(file, index))
+                            .unwrap();
                     }
                 }
             }

@@ -1,10 +1,10 @@
-use std::collections::hash_map::Entry;
 use image::{ColorType, DynamicImage, GenericImage, GenericImageView, Pixel, Rgba};
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum DistanceAlgorithm {
@@ -24,7 +24,7 @@ impl DistanceAlgorithm {
         }
     }
 
-    pub const fn standardise_closeness_threshold (self, n: u32) -> u32 {
+    pub const fn standardise_closeness_threshold(self, n: u32) -> u32 {
         match self {
             Self::Euclidean | Self::ProductDifference => n * n,
             Self::Manhattan | Self::Brightness => n,
@@ -38,8 +38,12 @@ impl Display for DistanceAlgorithm {
     }
 }
 
-pub const ALL_ALGOS: &[DistanceAlgorithm] =
-    &[DistanceAlgorithm::Euclidean, DistanceAlgorithm::Manhattan, DistanceAlgorithm::ProductDifference, DistanceAlgorithm::Brightness];
+pub const ALL_ALGOS: &[DistanceAlgorithm] = &[
+    DistanceAlgorithm::Euclidean,
+    DistanceAlgorithm::Manhattan,
+    DistanceAlgorithm::ProductDifference,
+    DistanceAlgorithm::Brightness,
+];
 
 impl DistanceAlgorithm {
     pub const fn distance(self, a: Rgba<u8>, b: Rgba<u8>) -> u32 {
@@ -80,15 +84,15 @@ impl DistanceAlgorithm {
             Rgba([r, g, b, _]): Rgba<u8>,
             Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
         ) -> u32 {
-            (r as u32 + g as u32 + b as u32).abs_diff(cmp_r as u32 + cmp_g as u32 + cmp_b as u32) / 3
+            (r as u32 + g as u32 + b as u32).abs_diff(cmp_r as u32 + cmp_g as u32 + cmp_b as u32)
+                / 3
         }
-
 
         match self {
             Self::Euclidean => euclidean_distance(a, b),
             Self::Manhattan => manhattan_distance(a, b),
             Self::ProductDifference => product_difference(a, b),
-            Self::Brightness => brightness(a, b)
+            Self::Brightness => brightness(a, b),
         }
     }
 }
@@ -151,8 +155,10 @@ pub fn get_palette(
 ) -> Vec<Rgba<u8>> {
     let chunks_per_dimension =
         get_closest_factor(chunks_per_dimension, image.width().min(image.height()));
-    let (width_chunk_size, height_chunk_size) =
-        (image.width() / chunks_per_dimension, image.height() / chunks_per_dimension);
+    let (width_chunk_size, height_chunk_size) = (
+        image.width() / chunks_per_dimension,
+        image.height() / chunks_per_dimension,
+    );
 
     let num_chunks = chunks_per_dimension * chunks_per_dimension;
     let mut progress_bar = 0;
@@ -176,7 +182,9 @@ pub fn get_palette(
                         Entry::Vacant(vac) => {
                             let mut too_close = false;
                             for so_far in av_px_colours.iter().copied() {
-                                if dist_algo.distance(px, so_far) < dist_algo.standardise_closeness_threshold(closeness_threshold) {
+                                if dist_algo.distance(px, so_far)
+                                    < dist_algo.standardise_closeness_threshold(closeness_threshold)
+                                {
                                     too_close = true;
                                     break;
                                 }
@@ -192,7 +200,10 @@ pub fn get_palette(
                 }
             }
 
-            if let Some((most_common, _)) = occurencces_of_suitably_far.into_iter().max_by_key(|(_, count)| *count) {
+            if let Some((most_common, _)) = occurencces_of_suitably_far
+                .into_iter()
+                .max_by_key(|(_, count)| *count)
+            {
                 av_px_colours.push(most_common);
                 cache.clear();
             }
@@ -298,7 +309,6 @@ pub fn dither_palette(
                     second
                 }
             };
-
 
             for px_x in (dithering_scale * chunk_x)..(dithering_scale * (chunk_x + 1)) {
                 for px_y in (dithering_scale * chunk_y)..(dithering_scale * (chunk_y + 1)) {
