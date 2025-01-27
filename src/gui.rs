@@ -31,7 +31,7 @@ enum RenderStage {
     Nothing,
     ReadInImage,
     WithPalette,
-    RenderedImage(usize),
+    DisplayingImage(usize),
 }
 
 #[derive(Clone)]
@@ -40,6 +40,7 @@ struct RenderedImage {
     palette: Vec<Rgba<u8>>,
     output: DynamicImage,
     handle: TextureHandle,
+    settings: (PaletteSettings, OutputSettings, DistanceAlgorithm),
 }
 
 struct PhotoBeingEdited {
@@ -103,12 +104,13 @@ impl PhotoBeingEdited {
                         .unwrap(); //TODO: fix all these unwraps
                     self.last_progress_received = (0, 1);
                 }
-                ThreadResult::RenderedPalette(input, palette) => {
+                ThreadResult::RenderedPalette(input, palette, palette_settings) => {
                     self.stage = RenderStage::WithPalette;
                     self.requests_tx
                         .send(ThreadRequest::RenderOutput {
                             input,
                             palette,
+                            palette_settings,
                             output_settings,
                             distance_algorithm,
                         })
@@ -119,6 +121,7 @@ impl PhotoBeingEdited {
                     input,
                     palette,
                     output,
+                    settings,
                 } => {
                     let handle = ctx.load_texture(
                         "my-img",
@@ -130,10 +133,11 @@ impl PhotoBeingEdited {
                         palette,
                         output,
                         handle,
+                        settings,
                     };
 
                     self.image_history.push(ri.clone());
-                    self.stage = RenderStage::RenderedImage(self.image_history.len() - 1);
+                    self.stage = RenderStage::DisplayingImage(self.image_history.len() - 1);
                     self.last_progress_received = (0, 1);
                 }
                 ThreadResult::GotDestination(dst, index) => {
@@ -156,7 +160,7 @@ impl PhotoBeingEdited {
         distance_algorithm: DistanceAlgorithm,
     ) {
         let originally_contained = std::mem::replace(&mut self.stage, RenderStage::ReadInImage);
-        if let RenderStage::RenderedImage(idx) = originally_contained {
+        if let RenderStage::DisplayingImage(idx) = originally_contained {
             let input = self.image_history[idx].input.clone();
 
             self.requests_tx
@@ -177,13 +181,14 @@ impl PhotoBeingEdited {
         distance_algorithm: DistanceAlgorithm,
     ) {
         let originally_contained = std::mem::replace(&mut self.stage, RenderStage::WithPalette);
-        if let RenderStage::RenderedImage(index) = originally_contained {
+        if let RenderStage::DisplayingImage(index) = originally_contained {
             let ri = &self.image_history[index];
 
             self.requests_tx
                 .send(ThreadRequest::RenderOutput {
                     input: ri.input.clone(),
                     palette: ri.palette.clone(),
+                    palette_settings: ri.settings.0,
                     output_settings,
                     distance_algorithm,
                 })
@@ -197,7 +202,7 @@ impl PhotoBeingEdited {
     pub const fn is_ready_for_more_input(&self) -> bool {
         matches!(
             self.stage,
-            RenderStage::RenderedImage { .. } | RenderStage::Nothing
+            RenderStage::DisplayingImage { .. } | RenderStage::Nothing
         )
     }
 
@@ -414,22 +419,31 @@ impl eframe::App for PxlsApp {
             });
         });
 
-        if matches!(self.current.stage, RenderStage::RenderedImage(_)) {
+        if matches!(self.current.stage, RenderStage::DisplayingImage(_)) {
             egui::TopBottomPanel::new(TopBottomSide::Bottom, "bottom-panel").show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     //have to do the weird ifs for mutability reasons
-                    if let RenderStage::RenderedImage(index) = &mut self.current.stage {
+                    if let RenderStage::DisplayingImage(index) = &mut self.current.stage {
                         ui.label("History: ");
+                        let previous = *index;
+
                         #[allow(clippy::range_minus_one)] //😔
                         ui.add(Slider::new(
                             index,
                             0..=(self.current.image_history.len() - 1),
                         ));
+
+                        if previous != *index {
+                            let (palette, output, distance) = self.current.image_history[*index].settings;
+                            self.palette_settings = palette;
+                            self.output_settings = output;
+                            self.distance_algorithm = distance;
+                        }
                     }
 
                     ui.separator();
 
-                    if let RenderStage::RenderedImage(index) = &self.current.stage {
+                    if let RenderStage::DisplayingImage(index) = &self.current.stage {
                         if ui.button("Save").clicked() {
                             self.current.save_file(*index);
                         }
@@ -463,12 +477,11 @@ impl eframe::App for PxlsApp {
                         .show_percentage()
                         .ui(ui);
                 }
-                RenderStage::RenderedImage(index) => {
+                RenderStage::DisplayingImage(index) => {
                     let RenderedImage {
-                        input: _,
                         output,
                         handle,
-                        palette: _,
+                        ..
                     } = &self.current.image_history[*index];
 
                     let texture_id = TextureId::from(handle);

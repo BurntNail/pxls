@@ -19,6 +19,7 @@ pub enum ThreadRequest {
     RenderOutput {
         input: DynamicImage,
         palette: Vec<Rgba<u8>>,
+        palette_settings: PaletteSettings,
         output_settings: OutputSettings,
         distance_algorithm: DistanceAlgorithm,
     },
@@ -27,11 +28,12 @@ pub enum ThreadRequest {
 pub enum ThreadResult {
     ReadInFile(DynamicImage),
     GotDestination(PathBuf, usize),
-    RenderedPalette(DynamicImage, Vec<Rgba<u8>>),
+    RenderedPalette(DynamicImage, Vec<Rgba<u8>>, PaletteSettings),
     RenderedImage {
         input: DynamicImage,
         palette: Vec<Rgba<u8>>,
         output: DynamicImage,
+        settings: (PaletteSettings, OutputSettings, DistanceAlgorithm)
     },
 }
 
@@ -90,12 +92,13 @@ pub fn start_worker_thread() -> (
                     );
 
                     res_tx
-                        .send(ThreadResult::RenderedPalette(input, palette))
+                        .send(ThreadResult::RenderedPalette(input, palette, palette_settings))
                         .unwrap();
                 }
                 ThreadRequest::RenderOutput {
                     input,
                     palette,
+                    palette_settings,
                     output_settings,
                     distance_algorithm,
                 } => {
@@ -113,6 +116,7 @@ pub fn start_worker_thread() -> (
                             input,
                             palette,
                             output,
+                            settings: (palette_settings, output_settings, distance_algorithm)
                         })
                         .unwrap();
                 }
