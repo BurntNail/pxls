@@ -2,7 +2,7 @@ use crate::gui::worker_thread::{start_worker_thread, ThreadRequest, ThreadResult
 use eframe::{CreationContext, Frame, NativeOptions};
 use egui::panel::TopBottomSide;
 use egui::{
-    pos2, Color32, ColorImage, Context, ProgressBar, Rect, Slider, TextureHandle, TextureId,
+    pos2, Color32, ColorImage, Context, Grid, ProgressBar, Rect, Slider, TextureHandle, TextureId,
     TextureOptions, Widget,
 };
 use egui_extras::install_image_loaders;
@@ -45,6 +45,7 @@ struct RenderedImage {
 
 struct PhotoBeingEdited {
     stage: RenderStage,
+    was_just_set_to_display_img: bool,
     progress_rx: Receiver<(u32, u32)>,
     last_progress_received: (u32, u32),
     worker_handle: Option<JoinHandle<()>>,
@@ -62,6 +63,7 @@ impl PhotoBeingEdited {
 
         Self {
             stage: RenderStage::Nothing,
+            was_just_set_to_display_img: false,
             progress_rx,
             last_progress_received: (0, 1),
             worker_handle: Some(worker_handle),
@@ -73,9 +75,8 @@ impl PhotoBeingEdited {
         }
     }
 
-    pub fn pick_new_input(&mut self) {
+    pub fn pick_new_input(&self) {
         self.requests_tx.send(ThreadRequest::GetInputImage).unwrap();
-        self.stage = RenderStage::Nothing;
     }
 
     pub fn save_file(&self, index: usize) {
@@ -137,6 +138,7 @@ impl PhotoBeingEdited {
                     };
 
                     self.image_history.push(ri.clone());
+                    self.was_just_set_to_display_img = true;
                     self.stage = RenderStage::DisplayingImage(self.image_history.len() - 1);
                     self.last_progress_received = (0, 1);
                 }
@@ -198,14 +200,6 @@ impl PhotoBeingEdited {
         }
     }
 
-    #[inline]
-    pub const fn is_ready_for_more_input(&self) -> bool {
-        matches!(
-            self.stage,
-            RenderStage::DisplayingImage { .. } | RenderStage::Nothing
-        )
-    }
-
     fn color_image_from_dynamic_image(img: &DynamicImage) -> ColorImage {
         let (width, height) = (img.width() as _, img.height() as _);
         let mut pixels = Vec::with_capacity(width * height * 3);
@@ -225,7 +219,6 @@ impl PhotoBeingEdited {
 struct SettingsBuffers {
     chunks_per_dimension: String,
     closeness_threshold: String,
-    dithering_factor: String,
 }
 
 struct PxlsApp {
@@ -255,7 +248,6 @@ impl PxlsApp {
             setting_change_buffers: SettingsBuffers {
                 chunks_per_dimension: palette_settings.chunks_per_dimension.to_string(),
                 closeness_threshold: palette_settings.closeness_threshold.to_string(),
-                dithering_factor: output_settings.dithering_likelihood.to_string(),
             },
             needs_to_refresh_output: false,
             needs_to_refresh_palette: false,
@@ -273,8 +265,26 @@ impl eframe::App for PxlsApp {
             ctx,
         );
 
+        if self.current.was_just_set_to_display_img {
+            self.current.was_just_set_to_display_img = false;
+
+            self.needs_to_refresh_palette = false;
+            self.needs_to_refresh_output = false;
+            //TODO: better way of doing this?
+            //i think the issue is:
+            // - user scrolling through history
+            // - user gets to next history scroll within 1 frame
+            // - as of such, the palette settings etc never get a chance to be properly updated
+            // - so it thinks there's been a change
+            // - so it re-renders
+            //so maybe move the logic order around below?
+        }
+
         egui::TopBottomPanel::new(TopBottomSide::Top, "top_panel").show(ctx, |ui| {
-            if !self.current.is_ready_for_more_input() {
+            if !matches!(
+                &self.current.stage,
+                RenderStage::Nothing | RenderStage::DisplayingImage(_)
+            ) {
                 ui.disable();
             }
 
@@ -286,30 +296,69 @@ impl eframe::App for PxlsApp {
 
                     ui.checkbox(&mut self.auto_update, "Auto-Update");
 
-                    if self.needs_to_refresh_palette || self.needs_to_refresh_output {
-                        let mut needs_to_update = self.auto_update;
-                        if !needs_to_update {
-                            needs_to_update = ui.button("Update").clicked();
-                        }
-
-                        if needs_to_update {
-                            if self.needs_to_refresh_palette {
-                                self.current.change_palette_settings_or_algo(
-                                    self.palette_settings,
-                                    self.distance_algorithm,
-                                );
-                            } else if self.needs_to_refresh_output {
-                                self.current.change_output_settings(
-                                    self.output_settings,
-                                    self.distance_algorithm,
-                                );
+                    if self.needs_to_refresh_output || self.needs_to_refresh_palette {
+                        if let RenderStage::DisplayingImage(index) = &mut self.current.stage {
+                            let mut needs_to_update = self.auto_update;
+                            if !needs_to_update {
+                                needs_to_update = ui.button("Update").clicked();
                             }
 
-                            self.needs_to_refresh_palette = false;
-                            self.needs_to_refresh_output = false;
+                            if needs_to_update {
+                                let mut found = false;
+                                for (
+                                    i,
+                                    RenderedImage {
+                                        input,
+                                        settings: (palette, output, distance),
+                                        ..
+                                    },
+                                ) in self.current.image_history.iter().enumerate()
+                                {
+                                    //hopefully short-circuiting should ensure that the input is compared last :)
+                                    if self.distance_algorithm == *distance
+                                        && self.palette_settings == *palette
+                                        && self.output_settings == *output
+                                        && &self.current.image_history[*index].input == input
+                                    {
+                                        *index = i;
+                                        found = true;
+                                        break;
+                                    }
+                                }
+
+                                if !found {
+                                    if self.needs_to_refresh_palette {
+                                        self.current.change_palette_settings_or_algo(
+                                            self.palette_settings,
+                                            self.distance_algorithm,
+                                        );
+                                    } else if self.needs_to_refresh_output {
+                                        self.current.change_output_settings(
+                                            self.output_settings,
+                                            self.distance_algorithm,
+                                        );
+                                    }
+                                }
+
+                                self.needs_to_refresh_palette = false;
+                                self.needs_to_refresh_output = false;
+                            }
                         }
                     }
+
+                    let old_output_scaling = self.output_settings.scale_output_to_original;
+                    ui.checkbox(
+                        &mut self.output_settings.scale_output_to_original,
+                        "Preserve image size when saving",
+                    );
+                    if old_output_scaling != self.output_settings.scale_output_to_original {
+                        self.needs_to_refresh_output = true;
+                    }
+                    //TODO: work out a way to move this to the save logic
+                    //this worked well before, but with the history this settings absolutely destroys RAM usage
                 });
+
+                ui.separator();
 
                 ui.vertical(|ui| {
                     ui.label("Distance Algorithm:");
@@ -331,91 +380,99 @@ impl eframe::App for PxlsApp {
                 ui.separator();
 
                 ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Chunks per Dimension: ");
-                        ui.text_edit_singleline(
-                            &mut self.setting_change_buffers.chunks_per_dimension,
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Closeness Threshold: ");
-                        ui.text_edit_singleline(
-                            &mut self.setting_change_buffers.closeness_threshold,
-                        );
-                    });
-                });
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Virtual Pixel Size: ");
+                    Grid::new("output_settings").show(ui, |ui| {
+                        {
+                            ui.label("Chunks per Dimension: ");
+                            ui.text_edit_singleline(
+                                &mut self.setting_change_buffers.chunks_per_dimension,
+                            );
 
-                        let old_px_size = self.output_settings.output_px_size;
+                            if let Ok(new_chunks_per_dimension) =
+                                self.setting_change_buffers.chunks_per_dimension.parse()
+                            {
+                                if new_chunks_per_dimension
+                                    != self.palette_settings.chunks_per_dimension
+                                {
+                                    self.needs_to_refresh_palette = true;
+                                    self.palette_settings.chunks_per_dimension =
+                                        new_chunks_per_dimension;
+                                }
+                            }
 
-                        //make sure we don't get images that are too big to display. this is a pretty lazy solution, but i also can't see an alternative because we might not have an image yet lol
-                        let min = self.output_settings.dithering_scale.ilog2() + 1;
-                        ui.add(Slider::new(
-                            &mut self.output_settings.output_px_size,
-                            min..=10,
-                        ));
+                            ui.end_row();
+                        }
+                        {
+                            ui.label("Closeness Threshold: ");
+                            ui.text_edit_singleline(
+                                &mut self.setting_change_buffers.closeness_threshold,
+                            );
 
-                        if old_px_size != self.output_settings.output_px_size {
-                            self.needs_to_refresh_output = true;
+                            if let Ok(new_closeness_threshold) =
+                                self.setting_change_buffers.closeness_threshold.parse()
+                            {
+                                if new_closeness_threshold
+                                    != self.palette_settings.closeness_threshold
+                                {
+                                    self.needs_to_refresh_palette = true;
+                                    self.palette_settings.closeness_threshold =
+                                        new_closeness_threshold;
+                                }
+                            }
+
+                            ui.end_row();
+                        }
+                        {
+                            ui.label("Virtual Pixel Size: ");
+                            let old_px_size = self.output_settings.output_px_size;
+
+                            //make sure we don't get images that are too big to display. this is a pretty lazy solution, but i also can't see an alternative because we might not have an image yet lol
+                            let min = self.output_settings.dithering_scale.ilog2() + 1;
+                            ui.add(Slider::new(
+                                &mut self.output_settings.output_px_size,
+                                min..=10,
+                            ));
+
+                            if old_px_size != self.output_settings.output_px_size {
+                                self.needs_to_refresh_output = true;
+                            }
+
+                            ui.end_row();
+                        }
+                        {
+                            ui.label("Dithering Factor: ");
+
+                            let old_dl = self.output_settings.dithering_likelihood;
+                            ui.add_enabled(
+                                self.output_settings.dithering_scale > 1,
+                                Slider::new(&mut self.output_settings.dithering_likelihood, 1..=5),
+                            );
+
+                            if old_dl != self.output_settings.dithering_likelihood {
+                                self.needs_to_refresh_output = true;
+                            }
+
+                            ui.end_row();
+                        }
+                        {
+                            ui.label("Dithering Scale: ");
+
+                            let old_ds = self.output_settings.dithering_scale;
+                            ui.add(Slider::new(
+                                &mut self.output_settings.dithering_scale,
+                                1..=4,
+                            ));
+
+                            if old_ds != self.output_settings.dithering_scale {
+                                self.needs_to_refresh_output = true;
+                                self.output_settings.output_px_size =
+                                    (self.output_settings.dithering_scale.ilog2() + 1)
+                                        .max(self.output_settings.output_px_size);
+                            }
+
+                            ui.end_row();
                         }
                     });
-                    ui.horizontal(|ui| {
-                        ui.label("Dithering Factor: ");
-                        ui.text_edit_singleline(&mut self.setting_change_buffers.dithering_factor);
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Dithering Scale: ");
-
-                        let old_ds = self.output_settings.dithering_scale;
-                        ui.add(Slider::new(
-                            &mut self.output_settings.dithering_scale,
-                            1..=4,
-                        ));
-
-                        if old_ds != self.output_settings.dithering_scale {
-                            self.needs_to_refresh_output = true;
-                            self.output_settings.output_px_size =
-                                (self.output_settings.dithering_scale.ilog2() + 1)
-                                    .max(self.output_settings.output_px_size);
-                        }
-                    });
-
-                    let old_output_scaling = self.output_settings.scale_output_to_original;
-                    ui.checkbox(
-                        &mut self.output_settings.scale_output_to_original,
-                        "Preserve image size when saving",
-                    );
-                    if old_output_scaling != self.output_settings.scale_output_to_original {
-                        self.needs_to_refresh_output = true;
-                    }
-                });
-
-                if let Ok(new_chunks_per_dimension) =
-                    self.setting_change_buffers.chunks_per_dimension.parse()
-                {
-                    if new_chunks_per_dimension != self.palette_settings.chunks_per_dimension {
-                        self.needs_to_refresh_palette = true;
-                        self.palette_settings.chunks_per_dimension = new_chunks_per_dimension;
-                    }
-                }
-                if let Ok(new_closeness_threshold) =
-                    self.setting_change_buffers.closeness_threshold.parse()
-                {
-                    if new_closeness_threshold != self.palette_settings.closeness_threshold {
-                        self.needs_to_refresh_palette = true;
-                        self.palette_settings.closeness_threshold = new_closeness_threshold;
-                    }
-                }
-                if let Ok(new_dithering_factor) =
-                    self.setting_change_buffers.dithering_factor.parse()
-                {
-                    if new_dithering_factor != self.output_settings.dithering_likelihood {
-                        self.needs_to_refresh_output = true;
-                        self.output_settings.dithering_likelihood = new_dithering_factor;
-                    }
-                }
+                })
             });
         });
 
@@ -423,6 +480,8 @@ impl eframe::App for PxlsApp {
             egui::TopBottomPanel::new(TopBottomSide::Bottom, "bottom-panel").show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     //have to do the weird ifs for mutability reasons
+
+                    let mut needs_to_reset = false;
                     if let RenderStage::DisplayingImage(index) = &mut self.current.stage {
                         ui.label("History: ");
                         let previous = *index;
@@ -433,11 +492,44 @@ impl eframe::App for PxlsApp {
                             0..=(self.current.image_history.len() - 1),
                         ));
 
-                        if previous != *index {
-                            let (palette, output, distance) = self.current.image_history[*index].settings;
+                        let mut changed = previous != *index;
+
+                        if ui.button("Clear History").clicked() {
+                            self.current.image_history.clear();
+                            needs_to_reset = true;
+                        }
+
+                        if ui.button("Remove Current Image").clicked() {
+                            if self.current.image_history.len() == 1 {
+                                self.current.image_history.clear();
+                                needs_to_reset = true;
+                            } else {
+                                self.current.image_history.remove(*index);
+
+                                if *index == self.current.image_history.len() {
+                                    *index = self.current.image_history.len() - 1;
+                                }
+
+                                changed = true;
+                            }
+                        }
+
+                        if ui.button("Set History to Current").clicked() {
+                            let current = self.current.image_history.swap_remove(*index);
+                            self.current.image_history = vec![current];
+                            *index = 0;
+                            changed = true;
+                        }
+
+                        if changed {
+                            let (palette, output, distance) =
+                                self.current.image_history[*index].settings;
                             self.palette_settings = palette;
                             self.output_settings = output;
                             self.distance_algorithm = distance;
+
+                            self.needs_to_refresh_output = false;
+                            self.needs_to_refresh_palette = false;
                         }
                     }
 
@@ -447,6 +539,15 @@ impl eframe::App for PxlsApp {
                         if ui.button("Save").clicked() {
                             self.current.save_file(*index);
                         }
+                    }
+
+                    if needs_to_reset {
+                        self.current.stage = RenderStage::Nothing;
+                        self.distance_algorithm = DistanceAlgorithm::Euclidean;
+                        self.palette_settings = PaletteSettings::default();
+                        self.output_settings = OutputSettings::default();
+                        self.needs_to_refresh_output = false;
+                        self.needs_to_refresh_palette = false;
                     }
                 });
             });
@@ -478,11 +579,7 @@ impl eframe::App for PxlsApp {
                         .ui(ui);
                 }
                 RenderStage::DisplayingImage(index) => {
-                    let RenderedImage {
-                        output,
-                        handle,
-                        ..
-                    } = &self.current.image_history[*index];
+                    let RenderedImage { output, handle, .. } = &self.current.image_history[*index];
 
                     let texture_id = TextureId::from(handle);
 

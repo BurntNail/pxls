@@ -48,7 +48,7 @@ pub const ALL_ALGOS: &[DistanceAlgorithm] = &[
     DistanceAlgorithm::Product,
     DistanceAlgorithm::Brightness,
     DistanceAlgorithm::Luminance,
-    DistanceAlgorithm::SlowLuminance
+    DistanceAlgorithm::SlowLuminance,
 ];
 
 impl DistanceAlgorithm {
@@ -91,8 +91,11 @@ impl DistanceAlgorithm {
             Rgba([r, g, b, _]): Rgba<u8>,
             Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
         ) -> u32 {
-            let lum_a = ((r as u32) * 1063 / 5000) + ((g as u32) * 447 / 625) + ((b as u32) * 361 / 5000);
-            let lum_b = ((cmp_r as u32) * 1063 / 5000) + ((cmp_g as u32) * 447 / 625) + ((cmp_b as u32) * 361 / 5000);
+            let lum_a =
+                ((r as u32) * 1063 / 5000) + ((g as u32) * 447 / 625) + ((b as u32) * 361 / 5000);
+            let lum_b = ((cmp_r as u32) * 1063 / 5000)
+                + ((cmp_g as u32) * 447 / 625)
+                + ((cmp_b as u32) * 361 / 5000);
 
             lum_a.abs_diff(lum_b)
         }
@@ -102,8 +105,12 @@ impl DistanceAlgorithm {
             Rgba([r, g, b, _]): Rgba<u8>,
             Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
         ) -> u32 {
-            let lum_a = ((r as u32).pow(2) * 299 / 1000) + ((g as u32).pow(2) * 587 / 1000) + ((b as u32).pow(2) * 57 / 500);
-            let lum_b = ((cmp_r as u32).pow(2) * 299 / 1000) + ((cmp_g as u32).pow(2) * 587 / 1000) + ((cmp_b as u32).pow(2) * 57 / 500);
+            let lum_a = ((r as u32).pow(2) * 299 / 1000)
+                + ((g as u32).pow(2) * 587 / 1000)
+                + ((b as u32).pow(2) * 57 / 500);
+            let lum_b = ((cmp_r as u32).pow(2) * 299 / 1000)
+                + ((cmp_g as u32).pow(2) * 587 / 1000)
+                + ((cmp_b as u32).pow(2) * 57 / 500);
 
             (lum_a.isqrt()).abs_diff(lum_b.isqrt())
         }
@@ -128,7 +135,7 @@ impl DistanceAlgorithm {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct PaletteSettings {
     pub chunks_per_dimension: u32,
     pub closeness_threshold: u32,
@@ -151,13 +158,33 @@ pub struct OutputSettings {
     pub scale_output_to_original: bool,
 }
 
+impl PartialEq for OutputSettings {
+    fn eq(&self, other: &Self) -> bool {
+        if self.dithering_scale == 1 || other.dithering_scale == 1 {
+            if self.dithering_scale != other.dithering_scale {
+                false
+            } else {
+                self.output_px_size == other.output_px_size
+                    && self.scale_output_to_original == other.scale_output_to_original
+            }
+        } else {
+            self.output_px_size == other.output_px_size
+                && self.dithering_likelihood == other.dithering_likelihood
+                && self.dithering_scale == other.dithering_scale
+                && self.scale_output_to_original == other.scale_output_to_original
+        }
+    }
+}
+
+impl Eq for OutputSettings {}
+
 impl Default for OutputSettings {
     fn default() -> Self {
         Self {
             output_px_size: 5,
             dithering_likelihood: 4,
             dithering_scale: 2,
-            scale_output_to_original: true,
+            scale_output_to_original: false,
         }
     }
 }
