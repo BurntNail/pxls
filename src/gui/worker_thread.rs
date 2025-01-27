@@ -12,7 +12,7 @@ use std::thread::JoinHandle;
 
 pub enum ThreadRequest {
     GetInputImage,
-    GetOutputImage,
+    GetOutputImage(usize),
     RenderPalette {
         input: DynamicImage,
         palette_settings: PaletteSettings,
@@ -28,7 +28,7 @@ pub enum ThreadRequest {
 
 pub enum ThreadResult {
     ReadInFile(DynamicImage),
-    GotDestination(PathBuf),
+    GotDestination(PathBuf, usize),
     RenderedPalette(DynamicImage, Vec<Rgba<u8>>),
     RenderedImage {
         input: DynamicImage,
@@ -113,12 +113,12 @@ pub fn start_worker_thread() -> (
                         })
                         .unwrap();
                 },
-                ThreadRequest::GetOutputImage => {
+                ThreadRequest::GetOutputImage(index) => {
                     if let Some(file) = FileDialog::new()
                         .add_filter("Image Files", &["png", "jpg"])
                         .set_directory(current_dir().unwrap_or_else(|_| "/".into()))
                         .save_file() {
-                        res_tx.send(ThreadResult::GotDestination(file)).unwrap();
+                        res_tx.send(ThreadResult::GotDestination(file, index)).unwrap();
                     }
                 }
             }

@@ -10,8 +10,6 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-//TODO: preserve history and previous images
-
 mod worker_thread;
 
 pub fn gui_main() {
@@ -30,12 +28,15 @@ enum RenderStage {
     Nothing,
     ReadInImage,
     WithPalette,
-    RenderedImage {
-        input: DynamicImage,
-        palette: Vec<Rgba<u8>>,
-        output: DynamicImage,
-        handle: TextureHandle,
-    },
+    RenderedImage(usize),
+}
+
+#[derive(Clone)]
+struct RenderedImage {
+    input: DynamicImage,
+    palette: Vec<Rgba<u8>>,
+    output: DynamicImage,
+    handle: TextureHandle,
 }
 
 struct PhotoBeingEdited {
@@ -47,6 +48,7 @@ struct PhotoBeingEdited {
     requests_tx: Sender<ThreadRequest>,
     results_rx: Receiver<ThreadResult>,
     texture_options: TextureOptions,
+    image_history: Vec<RenderedImage>,
 }
 
 impl PhotoBeingEdited {
@@ -63,6 +65,7 @@ impl PhotoBeingEdited {
             results_rx,
             worker_should_stop,
             texture_options: TextureOptions::NEAREST,
+            image_history: vec![],
         }
     }
 
@@ -71,8 +74,8 @@ impl PhotoBeingEdited {
         self.stage = RenderStage::Nothing;
     }
 
-    pub fn save_file (&self) {
-        self.requests_tx.send(ThreadRequest::GetOutputImage).unwrap();
+    pub fn save_file (&self, index: usize) {
+        self.requests_tx.send(ThreadRequest::GetOutputImage(index)).unwrap();
     }
 
     pub fn process_thread_updates(
@@ -117,20 +120,21 @@ impl PhotoBeingEdited {
                         Self::color_image_from_dynamic_image(&output),
                         self.texture_options,
                     );
-
-                    self.stage = RenderStage::RenderedImage {
+                    let ri = RenderedImage {
                         input,
                         palette,
                         output,
                         handle,
                     };
+
+                    self.image_history.push(ri.clone());
+                    self.stage = RenderStage::RenderedImage(self.image_history.len() - 1);
                     self.last_progress_received = (0, 1);
                 }
-                ThreadResult::GotDestination(dst) => {
-                    if let RenderStage::RenderedImage {output, ..} = &self.stage {
-                        if let Err(e) = output.save(dst) {
-                            eprintln!("Error saving file: {e:?}");
-                        }
+                ThreadResult::GotDestination(dst, index) => {
+                    let output = &self.image_history[index];
+                    if let Err(e) = output.output.save(dst) {
+                        eprintln!("Error saving file: {e:?}");
                     }
                 }
             }
@@ -147,7 +151,9 @@ impl PhotoBeingEdited {
         distance_algorithm: DistanceAlgorithm,
     ) {
         let originally_contained = std::mem::replace(&mut self.stage, RenderStage::ReadInImage);
-        if let RenderStage::RenderedImage { input, .. } = originally_contained {
+        if let RenderStage::RenderedImage(idx) = originally_contained {
+            let input = self.image_history[idx].input.clone();
+
             self.requests_tx
                 .send(ThreadRequest::RenderPalette {
                     input,
@@ -166,11 +172,13 @@ impl PhotoBeingEdited {
         distance_algorithm: DistanceAlgorithm,
     ) {
         let originally_contained = std::mem::replace(&mut self.stage, RenderStage::WithPalette);
-        if let RenderStage::RenderedImage { input, palette, .. } = originally_contained {
+        if let RenderStage::RenderedImage(index) = originally_contained {
+            let ri = &self.image_history[index];
+
             self.requests_tx
                 .send(ThreadRequest::RenderOutput {
-                    input,
-                    palette,
+                    input: ri.input.clone(),
+                    palette: ri.palette.clone(),
                     output_settings,
                     distance_algorithm,
                 })
@@ -394,13 +402,25 @@ impl eframe::App for PxlsApp {
             });
         });
 
-        if let RenderStage::RenderedImage { .. } = &self.current.stage {
+
+
+        if matches!(self.current.stage, RenderStage::RenderedImage(_)) {
             egui::TopBottomPanel::new(TopBottomSide::Bottom, "bottom-panel").show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("Save").clicked() {
-                        self.current.save_file();
+                    //have to do the weird ifs for mutability reasons
+                    if let RenderStage::RenderedImage(index) = &mut self.current.stage {
+                        ui.label("History: ");
+                        ui.add(Slider::new(index, 0..=(self.current.image_history.len() - 1)));
                     }
-                })
+
+                    ui.separator();
+
+                    if let RenderStage::RenderedImage(index) = &self.current.stage {
+                        if ui.button("Save").clicked() {
+                            self.current.save_file(*index);
+                        }
+                    }
+                });
             });
         }
 
@@ -429,7 +449,11 @@ impl eframe::App for PxlsApp {
                         .show_percentage()
                         .ui(ui);
                 }
-                RenderStage::RenderedImage { input, handle, .. } => {
+                RenderStage::RenderedImage(index) => {
+                    let RenderedImage {
+                        input: _, output, handle, palette: _
+                    } = &self.current.image_history[*index];
+
                     let texture_id = TextureId::from(handle);
 
                     let uv = Rect {
@@ -439,7 +463,7 @@ impl eframe::App for PxlsApp {
 
                     let mut rect = ui.available_rect_before_wrap();
                     {
-                        let (img_width, img_height) = (input.width() as f32, input.height() as f32);
+                        let (img_width, img_height) = (output.width() as f32, output.height() as f32);
                         let img_aspect = img_width / img_height;
                         let available_aspect = rect.width() / rect.height();
 
