@@ -9,7 +9,7 @@ use egui_extras::install_image_loaders;
 use image::{DynamicImage, GenericImageView, Pixel, Rgba};
 use pxls::{DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -29,14 +29,20 @@ pub fn gui_main() {
 
 enum RenderStage {
     Nothing,
-    ReadInImage,
-    WithPalette,
+    CreatingPalette {
+        last_progress: (u32, u32),
+        progress_rx: Receiver<(u32, u32)>,
+    },
+    CreatingOutput {
+        last_progress: (u32, u32),
+        progress_rx: Receiver<(u32, u32)>,
+    },
     DisplayingImage(usize),
 }
 
 #[derive(Clone)]
 struct RenderedImage {
-    input: DynamicImage,
+    input: Arc<DynamicImage>,
     palette: Vec<Rgba<u8>>,
     output: DynamicImage,
     handle: TextureHandle,
@@ -45,9 +51,6 @@ struct RenderedImage {
 
 struct PhotoBeingEdited {
     stage: RenderStage,
-    was_just_set_to_display_img: bool,
-    progress_rx: Receiver<(u32, u32)>,
-    last_progress_received: (u32, u32),
     worker_handle: Option<JoinHandle<()>>,
     worker_should_stop: Arc<AtomicBool>,
     requests_tx: Sender<ThreadRequest>,
@@ -58,14 +61,11 @@ struct PhotoBeingEdited {
 
 impl PhotoBeingEdited {
     pub fn new() -> Self {
-        let (worker_handle, requests_tx, results_rx, progress_rx, worker_should_stop) =
+        let (worker_handle, requests_tx, results_rx, worker_should_stop) =
             start_worker_thread();
 
         Self {
             stage: RenderStage::Nothing,
-            was_just_set_to_display_img: false,
-            progress_rx,
-            last_progress_received: (0, 1),
             worker_handle: Some(worker_handle),
             requests_tx,
             results_rx,
@@ -95,18 +95,26 @@ impl PhotoBeingEdited {
         for update in self.results_rx.try_iter() {
             match update {
                 ThreadResult::ReadInFile(input) => {
-                    self.stage = RenderStage::ReadInImage;
+                    let (progress_tx, progress_rx) = channel();
+                    self.stage = RenderStage::CreatingPalette {
+                        progress_rx,
+                        last_progress: (0, 1)
+                    };
                     self.requests_tx
                         .send(ThreadRequest::RenderPalette {
                             input,
                             palette_settings,
                             distance_algorithm,
+                            progress_tx,
                         })
-                        .unwrap(); //TODO: fix all these unwraps
-                    self.last_progress_received = (0, 1);
+                        .unwrap();
                 }
-                ThreadResult::RenderedPalette(input, palette, palette_settings) => {
-                    self.stage = RenderStage::WithPalette;
+                ThreadResult::RenderedPalette {input, palette, palette_settings } => {
+                    let (progress_tx, progress_rx) = channel();
+                    self.stage = RenderStage::CreatingOutput {
+                        progress_rx,
+                        last_progress: (0, 1)
+                    };
                     self.requests_tx
                         .send(ThreadRequest::RenderOutput {
                             input,
@@ -114,9 +122,9 @@ impl PhotoBeingEdited {
                             palette_settings,
                             output_settings,
                             distance_algorithm,
+                            progress_tx
                         })
                         .unwrap();
-                    self.last_progress_received = (0, 1);
                 }
                 ThreadResult::RenderedImage {
                     input,
@@ -138,21 +146,29 @@ impl PhotoBeingEdited {
                     };
 
                     self.image_history.push(ri.clone());
-                    self.was_just_set_to_display_img = true;
                     self.stage = RenderStage::DisplayingImage(self.image_history.len() - 1);
-                    self.last_progress_received = (0, 1);
                 }
                 ThreadResult::GotDestination(dst, index) => {
-                    let output = &self.image_history[index];
-                    if let Err(e) = output.output.save(dst) {
-                        eprintln!("Error saving file: {e:?}");
+                    if let Some(output) = self.image_history.get(index) {
+                        if let Err(e) = output.output.save(dst) {
+                            eprintln!("Error saving file: {e:?}");
+                        }
                     }
                 }
             }
         }
 
-        for prog in self.progress_rx.try_iter() {
-            self.last_progress_received = prog;
+        match &mut self.stage {
+            RenderStage::CreatingOutput {
+                last_progress, progress_rx
+            } | RenderStage::CreatingPalette {
+                last_progress, progress_rx
+            } => {
+                for prog in progress_rx.try_iter() {
+                    *last_progress = prog;
+                }
+            },
+            _ => {}
         }
     }
 
@@ -161,17 +177,24 @@ impl PhotoBeingEdited {
         palette_settings: PaletteSettings,
         distance_algorithm: DistanceAlgorithm,
     ) {
-        let originally_contained = std::mem::replace(&mut self.stage, RenderStage::ReadInImage);
+        let originally_contained = std::mem::replace(&mut self.stage, RenderStage::Nothing);
         if let RenderStage::DisplayingImage(idx) = originally_contained {
             let input = self.image_history[idx].input.clone();
+            let (progress_tx, progress_rx) = channel();
 
             self.requests_tx
                 .send(ThreadRequest::RenderPalette {
                     input,
                     palette_settings,
                     distance_algorithm,
+                    progress_tx
                 })
                 .unwrap();
+
+            self.stage = RenderStage::CreatingPalette {
+                progress_rx,
+                last_progress: (0, 1),
+            }
         } else {
             self.stage = originally_contained;
         }
@@ -182,8 +205,9 @@ impl PhotoBeingEdited {
         output_settings: OutputSettings,
         distance_algorithm: DistanceAlgorithm,
     ) {
-        let originally_contained = std::mem::replace(&mut self.stage, RenderStage::WithPalette);
+        let originally_contained = std::mem::replace(&mut self.stage, RenderStage::Nothing);
         if let RenderStage::DisplayingImage(index) = originally_contained {
+            let (progress_tx, progress_rx) = channel();
             let ri = &self.image_history[index];
 
             self.requests_tx
@@ -193,8 +217,14 @@ impl PhotoBeingEdited {
                     palette_settings: ri.settings.0,
                     output_settings,
                     distance_algorithm,
+                    progress_tx
                 })
                 .unwrap();
+
+            self.stage = RenderStage::CreatingOutput {
+                progress_rx,
+                last_progress: (0, 1),
+            }
         } else {
             self.stage = originally_contained;
         }
@@ -264,21 +294,6 @@ impl eframe::App for PxlsApp {
             self.distance_algorithm,
             ctx,
         );
-
-        if self.current.was_just_set_to_display_img {
-            self.current.was_just_set_to_display_img = false;
-
-            self.needs_to_refresh_palette = false;
-            self.needs_to_refresh_output = false;
-            //TODO: better way of doing this?
-            //i think the issue is:
-            // - user scrolling through history
-            // - user gets to next history scroll within 1 frame
-            // - as of such, the palette settings etc never get a chance to be properly updated
-            // - so it thinks there's been a change
-            // - so it re-renders
-            //so maybe move the logic order around below?
-        }
 
         egui::TopBottomPanel::new(TopBottomSide::Top, "top_panel").show(ctx, |ui| {
             if !matches!(
@@ -560,20 +575,20 @@ impl eframe::App for PxlsApp {
                         ui.label("Pick a file!");
                     });
                 }
-                RenderStage::ReadInImage => {
+                RenderStage::CreatingPalette {last_progress, ..} => {
                     ui.label("Creating palette...");
 
-                    let (so_far, max) = self.current.last_progress_received;
-                    ProgressBar::new((so_far as f32) / (max as f32))
+                    let (so_far, max) = last_progress;
+                    ProgressBar::new((*so_far as f32) / (*max as f32))
                         .animate(true)
                         .show_percentage()
                         .ui(ui);
                 }
-                RenderStage::WithPalette => {
+                RenderStage::CreatingOutput {last_progress, ..} => {
                     ui.label("Converting and dithering...");
 
-                    let (so_far, max) = self.current.last_progress_received;
-                    ProgressBar::new((so_far as f32) / (max as f32))
+                    let (so_far, max) = last_progress;
+                    ProgressBar::new((*so_far as f32) / (*max as f32))
                         .animate(true)
                         .show_percentage()
                         .ui(ui);

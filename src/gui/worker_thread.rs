@@ -12,25 +12,31 @@ pub enum ThreadRequest {
     GetInputImage,
     GetOutputImage(usize),
     RenderPalette {
-        input: DynamicImage,
+        input: Arc<DynamicImage>,
         palette_settings: PaletteSettings,
         distance_algorithm: DistanceAlgorithm,
+        progress_tx: Sender<(u32, u32)>
     },
     RenderOutput {
-        input: DynamicImage,
+        input: Arc<DynamicImage>,
         palette: Vec<Rgba<u8>>,
         palette_settings: PaletteSettings,
         output_settings: OutputSettings,
         distance_algorithm: DistanceAlgorithm,
+        progress_tx: Sender<(u32, u32)>
     },
 }
 
 pub enum ThreadResult {
-    ReadInFile(DynamicImage),
+    ReadInFile(Arc<DynamicImage>),
     GotDestination(PathBuf, usize),
-    RenderedPalette(DynamicImage, Vec<Rgba<u8>>, PaletteSettings),
+    RenderedPalette {
+        input: Arc<DynamicImage>,
+        palette: Vec<Rgba<u8>>,
+        palette_settings: PaletteSettings,
+    },
     RenderedImage {
-        input: DynamicImage,
+        input: Arc<DynamicImage>,
         palette: Vec<Rgba<u8>>,
         output: DynamicImage,
         settings: (PaletteSettings, OutputSettings, DistanceAlgorithm),
@@ -42,12 +48,10 @@ pub fn start_worker_thread() -> (
     JoinHandle<()>,
     Sender<ThreadRequest>,
     Receiver<ThreadResult>,
-    Receiver<(u32, u32)>,
     Arc<AtomicBool>,
 ) {
     let (req_tx, req_rx) = channel();
     let (res_tx, res_rx) = channel();
-    let (prog_tx, prog_rx) = channel();
     let should_stop = Arc::new(AtomicBool::new(false));
     let ret_should_stop = should_stop.clone();
 
@@ -66,7 +70,7 @@ pub fn start_worker_thread() -> (
                         match ImageReader::open(file) {
                             Ok(img) => match img.decode() {
                                 Ok(img) => {
-                                    res_tx.send(ThreadResult::ReadInFile(img)).unwrap();
+                                    res_tx.send(ThreadResult::ReadInFile(Arc::new(img))).unwrap();
                                 }
                                 Err(e) => {
                                     eprintln!("Error decoding image: {e:?}");
@@ -82,21 +86,22 @@ pub fn start_worker_thread() -> (
                     input,
                     palette_settings,
                     distance_algorithm,
+                    progress_tx,
                 } => {
                     let palette = get_palette(
                         &input,
                         palette_settings,
                         distance_algorithm,
-                        &prog_tx,
+                        &progress_tx,
                         should_stop.clone(),
                     );
 
                     res_tx
-                        .send(ThreadResult::RenderedPalette(
+                        .send(ThreadResult::RenderedPalette {
                             input,
                             palette,
-                            palette_settings,
-                        ))
+                            palette_settings: palette_settings,
+                        })
                         .unwrap();
                 }
                 ThreadRequest::RenderOutput {
@@ -105,13 +110,14 @@ pub fn start_worker_thread() -> (
                     palette_settings,
                     output_settings,
                     distance_algorithm,
+                    progress_tx
                 } => {
                     let output = dither_palette(
                         &input,
                         &palette,
                         distance_algorithm,
                         output_settings,
-                        &prog_tx,
+                        &progress_tx,
                         should_stop.clone(),
                     );
 
@@ -139,5 +145,5 @@ pub fn start_worker_thread() -> (
         }
     });
 
-    (handle, req_tx, res_rx, prog_rx, ret_should_stop)
+    (handle, req_tx, res_rx, ret_should_stop)
 }
