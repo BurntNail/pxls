@@ -5,7 +5,6 @@ use egui::{
     pos2, Color32, ColorImage, Context, Grid, ProgressBar, Rect, Slider, TextureHandle, TextureId,
     TextureOptions, Widget,
 };
-use egui_extras::install_image_loaders;
 use image::{DynamicImage, GenericImageView, Pixel, Rgba};
 use pxls::{pixel_perfect_scale, DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -271,9 +270,7 @@ struct PxlsApp {
 }
 
 impl PxlsApp {
-    pub fn new(cc: &CreationContext<'_>) -> Self {
-        install_image_loaders(&cc.egui_ctx);
-
+    pub fn new(_cc: &CreationContext<'_>) -> Self {
         let palette_settings = PaletteSettings::default();
         let output_settings = OutputSettings::default();
 
@@ -282,7 +279,7 @@ impl PxlsApp {
             distance_algorithm: DistanceAlgorithm::Euclidean,
             palette_settings,
             output_settings,
-            auto_update: false,
+            auto_update: true,
             setting_change_buffers: SettingsBuffers {
                 chunks_per_dimension: palette_settings.chunks_per_dimension.to_string(),
                 closeness_threshold: palette_settings.closeness_threshold.to_string(),

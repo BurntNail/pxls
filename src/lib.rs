@@ -384,7 +384,7 @@ pub fn pixel_perfect_scale(output_settings: OutputSettings, from: &DynamicImage)
         return from.clone();
     }
 
-    let scaling_factor = output_settings.output_px_size / output_settings.dithering_scale;
+    let scaling_factor = (1 << (output_settings.output_px_size - 1)) / output_settings.dithering_scale;
 
     let (final_w, final_h) = (
         from.width() * scaling_factor,
