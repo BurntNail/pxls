@@ -184,7 +184,7 @@ impl Default for OutputSettings {
             output_px_size: 5,
             dithering_likelihood: 4,
             dithering_scale: 2,
-            scale_output_to_original: false,
+            scale_output_to_original: true,
         }
     }
 }
@@ -282,7 +282,8 @@ pub fn dither_original_with_palette(
     progress_sender: &Sender<(u32, u32)>,
     stop: Arc<AtomicBool>,
 ) -> DynamicImage {
-    let output_px_size = get_closest_factor(1 << (output_settings.output_px_size - 1), input.width());
+    let output_px_size =
+        get_closest_factor(1 << (output_settings.output_px_size - 1), input.width());
 
     let (width, height) = input.dimensions();
 
@@ -348,13 +349,18 @@ pub fn dither_original_with_palette(
 
             //TODO: make DL more ergonomic and easier to understand
             if first_distance.abs_diff(second_distance)
-                > (distance_algorithm.distance(first, second) / output_settings.dithering_likelihood)
+                > (distance_algorithm.distance(first, second)
+                    / output_settings.dithering_likelihood)
             {
                 second = first;
             }
 
-            for px_x in (output_settings.dithering_scale * chunk_x)..(output_settings.dithering_scale * (chunk_x + 1)) {
-                for px_y in (output_settings.dithering_scale * chunk_y)..(output_settings.dithering_scale * (chunk_y + 1)) {
+            for px_x in (output_settings.dithering_scale * chunk_x)
+                ..(output_settings.dithering_scale * (chunk_x + 1))
+            {
+                for px_y in (output_settings.dithering_scale * chunk_y)
+                    ..(output_settings.dithering_scale * (chunk_y + 1))
+                {
                     let mut is_even_px = px_y % 2 == 0;
                     if px_x % 2 == 0 {
                         is_even_px = !is_even_px;
@@ -373,14 +379,17 @@ pub fn dither_original_with_palette(
     pixel_perfect_scale(output_settings, &output)
 }
 
-pub fn pixel_perfect_scale (output_settings: OutputSettings, from: &DynamicImage) -> DynamicImage {
+pub fn pixel_perfect_scale(output_settings: OutputSettings, from: &DynamicImage) -> DynamicImage {
     if !output_settings.scale_output_to_original {
         return from.clone();
     }
 
     let scaling_factor = output_settings.output_px_size / output_settings.dithering_scale;
 
-    let (final_w, final_h) = (from.width() * scaling_factor, from.height() * scaling_factor);
+    let (final_w, final_h) = (
+        from.width() * scaling_factor,
+        from.height() * scaling_factor,
+    );
     let mut final_img = DynamicImage::new(final_w, final_h, ColorType::Rgb8);
 
     for x in 0..from.width() {
@@ -396,5 +405,4 @@ pub fn pixel_perfect_scale (output_settings: OutputSettings, from: &DynamicImage
     }
 
     final_img
-
 }

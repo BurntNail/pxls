@@ -1,5 +1,7 @@
 use image::{DynamicImage, ImageReader, Rgba};
-use pxls::{dither_original_with_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings};
+use pxls::{
+    dither_original_with_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings,
+};
 use rfd::FileDialog;
 use std::env::current_dir;
 use std::path::PathBuf;
@@ -15,7 +17,7 @@ pub enum ThreadRequest {
         input: Arc<DynamicImage>,
         palette_settings: PaletteSettings,
         distance_algorithm: DistanceAlgorithm,
-        progress_tx: Sender<(u32, u32)>
+        progress_tx: Sender<(u32, u32)>,
     },
     RenderOutput {
         input: Arc<DynamicImage>,
@@ -23,7 +25,7 @@ pub enum ThreadRequest {
         palette_settings: PaletteSettings,
         output_settings: OutputSettings,
         distance_algorithm: DistanceAlgorithm,
-        progress_tx: Sender<(u32, u32)>
+        progress_tx: Sender<(u32, u32)>,
     },
 }
 
@@ -70,7 +72,9 @@ pub fn start_worker_thread() -> (
                         match ImageReader::open(file) {
                             Ok(img) => match img.decode() {
                                 Ok(img) => {
-                                    res_tx.send(ThreadResult::ReadInFile(Arc::new(img))).unwrap();
+                                    res_tx
+                                        .send(ThreadResult::ReadInFile(Arc::new(img)))
+                                        .unwrap();
                                 }
                                 Err(e) => {
                                     eprintln!("Error decoding image: {e:?}");
@@ -100,7 +104,7 @@ pub fn start_worker_thread() -> (
                         .send(ThreadResult::RenderedPalette {
                             input,
                             palette,
-                            palette_settings: palette_settings,
+                            palette_settings,
                         })
                         .unwrap();
                 }
@@ -108,21 +112,21 @@ pub fn start_worker_thread() -> (
                     input,
                     palette,
                     palette_settings,
-                    mut output_settings,
+                    output_settings,
                     distance_algorithm,
-                    progress_tx
+                    progress_tx,
                 } => {
-                    let original_scale = output_settings.scale_output_to_original;
-                    output_settings.scale_output_to_original = false;
                     let output = dither_original_with_palette(
                         &input,
                         &palette,
                         distance_algorithm,
-                        output_settings,
+                        OutputSettings {
+                            scale_output_to_original: false,
+                            ..output_settings
+                        },
                         &progress_tx,
                         should_stop.clone(),
                     );
-                    output_settings.scale_output_to_original = original_scale;
 
                     res_tx
                         .send(ThreadResult::RenderedImage {
