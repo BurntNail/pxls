@@ -1,5 +1,5 @@
 use image::{DynamicImage, ImageReader, Rgba};
-use pxls::{dither_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings};
+use pxls::{dither_original_with_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings};
 use rfd::FileDialog;
 use std::env::current_dir;
 use std::path::PathBuf;
@@ -108,11 +108,13 @@ pub fn start_worker_thread() -> (
                     input,
                     palette,
                     palette_settings,
-                    output_settings,
+                    mut output_settings,
                     distance_algorithm,
                     progress_tx
                 } => {
-                    let output = dither_palette(
+                    let original_scale = output_settings.scale_output_to_original;
+                    output_settings.scale_output_to_original = false;
+                    let output = dither_original_with_palette(
                         &input,
                         &palette,
                         distance_algorithm,
@@ -120,6 +122,7 @@ pub fn start_worker_thread() -> (
                         &progress_tx,
                         should_stop.clone(),
                     );
+                    output_settings.scale_output_to_original = original_scale;
 
                     res_tx
                         .send(ThreadResult::RenderedImage {

@@ -3,7 +3,8 @@ use dialoguer::theme::ColorfulTheme;
 use dialoguer::{FuzzySelect, Input};
 use image::ImageReader;
 use pxls::{
-    dither_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS,
+    dither_original_with_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings,
+    ALL_ALGOS,
 };
 use std::collections::HashMap;
 use std::fs;
@@ -44,7 +45,7 @@ pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {
     );
     println!("Palette generated with {} colours", av_px_colours.len());
     println!("Converting image to palette & shrinking");
-    let output_img = dither_palette(
+    let output_img = dither_original_with_palette(
         &image,
         &av_px_colours,
         algorithm,

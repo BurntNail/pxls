@@ -274,32 +274,24 @@ pub fn get_palette(
     av_px_colours
 }
 
-pub fn dither_palette(
+pub fn dither_original_with_palette(
     input: &DynamicImage,
     palette: &[Rgba<u8>],
     distance_algorithm: DistanceAlgorithm,
-    OutputSettings {
-        output_px_size,
-        dithering_likelihood,
-        dithering_scale,
-        scale_output_to_original: output_img_scaling,
-    }: OutputSettings,
+    output_settings: OutputSettings,
     progress_sender: &Sender<(u32, u32)>,
     stop: Arc<AtomicBool>,
 ) -> DynamicImage {
-    let output_px_size = get_closest_factor(1 << (output_px_size - 1), input.width());
+    let output_px_size = get_closest_factor(1 << (output_settings.output_px_size - 1), input.width());
 
     let (width, height) = input.dimensions();
 
     let (num_width_chunks, num_height_chunks) = (width / output_px_size, height / output_px_size);
-    let (output_w, output_h) = if dithering_scale == 1 {
-        (num_width_chunks, num_height_chunks)
-    } else {
-        (
-            num_width_chunks * dithering_scale,
-            num_height_chunks * dithering_scale,
-        )
-    };
+    let (output_w, output_h) = (
+        num_width_chunks * output_settings.dithering_scale,
+        num_height_chunks * output_settings.dithering_scale,
+    );
+
     let mut output = DynamicImage::new(output_w, output_h, ColorType::Rgb8);
 
     let total_chunks = num_width_chunks * num_height_chunks;
@@ -352,32 +344,24 @@ pub fn dither_palette(
             }
 
             let first = first.unwrap();
-            let second = if second.is_none() || dithering_scale == 1 {
-                first
-            } else {
-                let second = second.unwrap();
-                let inter_candidate_distance = distance_algorithm.distance(first, second);
+            let mut second = second.unwrap_or(first);
 
-                //TODO: make DL more ergonomic and easier to understand
-                if first_distance.abs_diff(second_distance)
-                    > (inter_candidate_distance / dithering_likelihood)
-                {
-                    first
-                } else {
-                    second
-                }
-            };
+            //TODO: make DL more ergonomic and easier to understand
+            if first_distance.abs_diff(second_distance)
+                > (distance_algorithm.distance(first, second) / output_settings.dithering_likelihood)
+            {
+                second = first;
+            }
 
-            for px_x in (dithering_scale * chunk_x)..(dithering_scale * (chunk_x + 1)) {
-                for px_y in (dithering_scale * chunk_y)..(dithering_scale * (chunk_y + 1)) {
-                    let mut should_dither = px_y % 2 == 0;
+            for px_x in (output_settings.dithering_scale * chunk_x)..(output_settings.dithering_scale * (chunk_x + 1)) {
+                for px_y in (output_settings.dithering_scale * chunk_y)..(output_settings.dithering_scale * (chunk_y + 1)) {
+                    let mut is_even_px = px_y % 2 == 0;
                     if px_x % 2 == 0 {
-                        should_dither = !should_dither;
+                        is_even_px = !is_even_px;
                     }
+                    is_even_px &= output_settings.dithering_scale > 1;
 
-                    should_dither &= dithering_scale > 1;
-
-                    output.put_pixel(px_x, px_y, if should_dither { first } else { second });
+                    output.put_pixel(px_x, px_y, if is_even_px { first } else { second });
                 }
             }
 
@@ -386,27 +370,22 @@ pub fn dither_palette(
         }
     }
 
-    if !output_img_scaling {
-        return output;
+    pixel_perfect_scale(output_settings, &output)
+}
+
+pub fn pixel_perfect_scale (output_settings: OutputSettings, from: &DynamicImage) -> DynamicImage {
+    if !output_settings.scale_output_to_original {
+        return from.clone();
     }
 
-    //yes this is the lazy way of doing things
-    //compared to doing it in the above loop
-    //but
-    //this logic is vastly simpler
-    //and it's not like it takes that long
-    let scaling_factor = if dithering_scale == 1 {
-        output_px_size
-    } else {
-        output_px_size / dithering_scale
-    };
+    let scaling_factor = output_settings.output_px_size / output_settings.dithering_scale;
 
-    let (final_w, final_h) = (output_w * scaling_factor, output_h * scaling_factor);
+    let (final_w, final_h) = (from.width() * scaling_factor, from.height() * scaling_factor);
     let mut final_img = DynamicImage::new(final_w, final_h, ColorType::Rgb8);
 
-    for x in 0..output_w {
-        for y in 0..output_h {
-            let px = output.get_pixel(x, y);
+    for x in 0..from.width() {
+        for y in 0..from.height() {
+            let px = from.get_pixel(x, y);
 
             for px_x in (scaling_factor * x)..(scaling_factor * (x + 1)) {
                 for px_y in (scaling_factor * y)..(scaling_factor * (y + 1)) {
@@ -417,4 +396,5 @@ pub fn dither_palette(
     }
 
     final_img
+
 }

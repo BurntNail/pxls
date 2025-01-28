@@ -7,7 +7,7 @@ use egui::{
 };
 use egui_extras::install_image_loaders;
 use image::{DynamicImage, GenericImageView, Pixel, Rgba};
-use pxls::{DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
+use pxls::{pixel_perfect_scale, DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -61,8 +61,7 @@ struct PhotoBeingEdited {
 
 impl PhotoBeingEdited {
     pub fn new() -> Self {
-        let (worker_handle, requests_tx, results_rx, worker_should_stop) =
-            start_worker_thread();
+        let (worker_handle, requests_tx, results_rx, worker_should_stop) = start_worker_thread();
 
         Self {
             stage: RenderStage::Nothing,
@@ -98,7 +97,7 @@ impl PhotoBeingEdited {
                     let (progress_tx, progress_rx) = channel();
                     self.stage = RenderStage::CreatingPalette {
                         progress_rx,
-                        last_progress: (0, 1)
+                        last_progress: (0, 1),
                     };
                     self.requests_tx
                         .send(ThreadRequest::RenderPalette {
@@ -109,11 +108,15 @@ impl PhotoBeingEdited {
                         })
                         .unwrap();
                 }
-                ThreadResult::RenderedPalette {input, palette, palette_settings } => {
+                ThreadResult::RenderedPalette {
+                    input,
+                    palette,
+                    palette_settings,
+                } => {
                     let (progress_tx, progress_rx) = channel();
                     self.stage = RenderStage::CreatingOutput {
                         progress_rx,
-                        last_progress: (0, 1)
+                        last_progress: (0, 1),
                     };
                     self.requests_tx
                         .send(ThreadRequest::RenderOutput {
@@ -122,7 +125,7 @@ impl PhotoBeingEdited {
                             palette_settings,
                             output_settings,
                             distance_algorithm,
-                            progress_tx
+                            progress_tx,
                         })
                         .unwrap();
                 }
@@ -150,7 +153,9 @@ impl PhotoBeingEdited {
                 }
                 ThreadResult::GotDestination(dst, index) => {
                     if let Some(output) = self.image_history.get(index) {
-                        if let Err(e) = output.output.save(dst) {
+                        let scaled = pixel_perfect_scale(output_settings, &output.output);
+
+                        if let Err(e) = scaled.save(dst) {
                             eprintln!("Error saving file: {e:?}");
                         }
                     }
@@ -160,14 +165,17 @@ impl PhotoBeingEdited {
 
         match &mut self.stage {
             RenderStage::CreatingOutput {
-                last_progress, progress_rx
-            } | RenderStage::CreatingPalette {
-                last_progress, progress_rx
+                last_progress,
+                progress_rx,
+            }
+            | RenderStage::CreatingPalette {
+                last_progress,
+                progress_rx,
             } => {
                 for prog in progress_rx.try_iter() {
                     *last_progress = prog;
                 }
-            },
+            }
             _ => {}
         }
     }
@@ -187,7 +195,7 @@ impl PhotoBeingEdited {
                     input,
                     palette_settings,
                     distance_algorithm,
-                    progress_tx
+                    progress_tx,
                 })
                 .unwrap();
 
@@ -217,7 +225,7 @@ impl PhotoBeingEdited {
                     palette_settings: ri.settings.0,
                     output_settings,
                     distance_algorithm,
-                    progress_tx
+                    progress_tx,
                 })
                 .unwrap();
 
@@ -575,7 +583,7 @@ impl eframe::App for PxlsApp {
                         ui.label("Pick a file!");
                     });
                 }
-                RenderStage::CreatingPalette {last_progress, ..} => {
+                RenderStage::CreatingPalette { last_progress, .. } => {
                     ui.label("Creating palette...");
 
                     let (so_far, max) = last_progress;
@@ -584,7 +592,7 @@ impl eframe::App for PxlsApp {
                         .show_percentage()
                         .ui(ui);
                 }
-                RenderStage::CreatingOutput {last_progress, ..} => {
+                RenderStage::CreatingOutput { last_progress, .. } => {
                     ui.label("Converting and dithering...");
 
                     let (so_far, max) = last_progress;
