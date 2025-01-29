@@ -1,5 +1,5 @@
 use crate::gui::worker_thread::{start_worker_thread, ThreadRequest, ThreadResult};
-use eframe::{CreationContext, Frame, NativeOptions};
+use eframe::{CreationContext, Frame, NativeOptions, Storage};
 use egui::panel::TopBottomSide;
 use egui::{
     pos2, Color32, ColorImage, Context, Grid, ProgressBar, Rect, Slider, TextureHandle, TextureId,
@@ -7,6 +7,7 @@ use egui::{
 };
 use image::{DynamicImage, GenericImageView, Pixel, Rgba};
 use pxls::{pixel_perfect_scale, DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -51,6 +52,7 @@ struct RenderedImage {
 struct PhotoBeingEdited {
     stage: RenderStage,
     worker_handle: Option<JoinHandle<()>>,
+    last_start_save_dirs: (Option<PathBuf>, Option<PathBuf>),
     worker_should_stop: Arc<AtomicBool>,
     requests_tx: Sender<ThreadRequest>,
     results_rx: Receiver<ThreadResult>,
@@ -59,12 +61,14 @@ struct PhotoBeingEdited {
 }
 
 impl PhotoBeingEdited {
-    pub fn new() -> Self {
-        let (worker_handle, requests_tx, results_rx, worker_should_stop) = start_worker_thread();
+    pub fn new(last_start_save_dirs: (Option<PathBuf>, Option<PathBuf>)) -> Self {
+        let (worker_handle, requests_tx, results_rx, worker_should_stop) =
+            start_worker_thread(last_start_save_dirs.clone());
 
         Self {
             stage: RenderStage::Nothing,
             worker_handle: Some(worker_handle),
+            last_start_save_dirs,
             requests_tx,
             results_rx,
             worker_should_stop,
@@ -92,7 +96,7 @@ impl PhotoBeingEdited {
     ) {
         for update in self.results_rx.try_iter() {
             match update {
-                ThreadResult::ReadInFile(input) => {
+                ThreadResult::ReadInFile(start_dir, input) => {
                     let (progress_tx, progress_rx) = channel();
                     self.stage = RenderStage::CreatingPalette {
                         progress_rx,
@@ -106,6 +110,8 @@ impl PhotoBeingEdited {
                             progress_tx,
                         })
                         .unwrap();
+
+                    self.last_start_save_dirs.0 = Some(start_dir);
                 }
                 ThreadResult::RenderedPalette {
                     input,
@@ -150,14 +156,20 @@ impl PhotoBeingEdited {
                     self.image_history.push(ri.clone());
                     self.stage = RenderStage::DisplayingImage(self.image_history.len() - 1);
                 }
-                ThreadResult::GotDestination(dst, index) => {
+                ThreadResult::GotDestination {
+                    file,
+                    index,
+                    save_dir,
+                } => {
                     if let Some(output) = self.image_history.get(index) {
                         let scaled = pixel_perfect_scale(output_settings, &output.output);
 
-                        if let Err(e) = scaled.save(dst) {
+                        if let Err(e) = scaled.save(file) {
                             eprintln!("Error saving file: {e:?}");
                         }
                     }
+
+                    self.last_start_save_dirs.1 = Some(save_dir);
                 }
             }
         }
@@ -270,12 +282,21 @@ struct PxlsApp {
 }
 
 impl PxlsApp {
-    pub fn new(_cc: &CreationContext<'_>) -> Self {
+    pub fn new(cc: &CreationContext<'_>) -> Self {
+        const FALLBACK: (Option<PathBuf>, Option<PathBuf>) = (None, None);
+        let start_and_save_dirs = cc.storage.map_or(FALLBACK, |storage| {
+            storage
+                .get_string("start_and_save_dirs")
+                .map_or(FALLBACK, |sered| {
+                    serde_json::from_str(&sered).unwrap_or(FALLBACK)
+                })
+        });
+
         let palette_settings = PaletteSettings::default();
         let output_settings = OutputSettings::default();
 
         Self {
-            current: PhotoBeingEdited::new(),
+            current: PhotoBeingEdited::new(start_and_save_dirs),
             distance_algorithm: DistanceAlgorithm::Euclidean,
             palette_settings,
             output_settings,
@@ -374,8 +395,6 @@ impl eframe::App for PxlsApp {
                     if old_output_scaling != self.output_settings.scale_output_to_original {
                         self.needs_to_refresh_output = true;
                     }
-                    //TODO: work out a way to move this to the save logic
-                    //this worked well before, but with the history this settings absolutely destroys RAM usage
                 });
 
                 ui.separator();
@@ -631,10 +650,21 @@ impl eframe::App for PxlsApp {
         });
     }
 
+    fn save(&mut self, storage: &mut dyn Storage) {
+        if self.current.last_start_save_dirs.0.is_some()
+            || self.current.last_start_save_dirs.1.is_some()
+        {
+            if let Ok(sered) = serde_json::to_string(&self.current.last_start_save_dirs) {
+                storage.set_string("start_and_save_dirs", sered);
+            }
+        }
+    }
+
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.current
             .worker_should_stop
             .store(true, Ordering::Relaxed);
+
         if let Some(handle) = self.current.worker_handle.take() {
             if handle.join().is_err() {
                 eprintln!("Error joining thread");
