@@ -1,10 +1,8 @@
+use std::ops::Div;
 use crate::gui::worker_thread::{start_worker_thread, ThreadRequest, ThreadResult};
 use eframe::{CreationContext, Frame, NativeOptions, Storage};
 use egui::panel::TopBottomSide;
-use egui::{
-    pos2, Color32, ColorImage, Context, Grid, ProgressBar, Rect, Slider, TextureHandle, TextureId,
-    TextureOptions, Widget,
-};
+use egui::{pos2, Color32, ColorImage, Context, Grid, ProgressBar, Rect, Slider, Stroke, TextureHandle, TextureId, TextureOptions, Widget};
 use image::{DynamicImage, GenericImageView, Pixel, Rgba};
 use pxls::{pixel_perfect_scale, DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
 use std::path::PathBuf;
@@ -12,6 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
+use egui::Rounding;
+use egui::epaint::RectShape;
 
 mod worker_thread;
 
@@ -487,18 +487,62 @@ impl eframe::App for PxlsApp {
                 });
 
                 if let RenderStage::DisplayingImage(index) = self.current.stage {
-                    ui.separator();
-                    ui.vertical(|ui| {
-                        let img = &self.current.image_history[index];
+                    let img = &self.current.image_history[index];
+                    let palette = img.palette.as_slice();
 
-                        let palette_size = img.palette.len();
-                        let input_dims = img.input.dimensions();
-                        let output_dims = img.output.dimensions();
+                    let horizontal_no_colours = (palette.len() as f32).sqrt().ceil();
+                    let vertical_no_colours = (palette.len() as f32).div(horizontal_no_colours).ceil();
 
-                        ui.label(format!("Palette Size: {palette_size}"));
-                        ui.label(format!("Input Dimensions: {input_dims:?}"));
-                        ui.label(format!("Output Dimensions: {output_dims:?}"));
-                    });
+                    let available_rect = ui.available_rect_before_wrap();
+                    println!("AR: {available_rect:?}");
+
+                    let (cell_size, start_x, start_y) = {
+                        let cell_width = available_rect.width() / horizontal_no_colours;
+                        let cell_height = available_rect.height() / vertical_no_colours;
+
+                        let cell_size = cell_width.min(cell_height);
+
+                        let start_x = (available_rect.width() - cell_size * horizontal_no_colours) / 2.0;
+                        let start_y = (available_rect.height() - cell_size * vertical_no_colours) / 2.0;
+
+                        (cell_size, available_rect.min.x + start_x, available_rect.min.y + start_y)
+                    };
+
+                    let mut i = 0;
+                    let painter = ui.painter();
+
+                    //TODO: memoise, or just create an Image lol
+                    'outer: for x in 0..(horizontal_no_colours as usize) {
+                        for y in 0..(vertical_no_colours as usize) {
+                            let (x, y) = (x as f32, y as f32);
+                            let rectangle = RectShape {
+                                rect: Rect {
+                                    min: pos2(start_x + x * cell_size, start_y + y * cell_size),
+                                    max: pos2(start_x + (x+1.0) * cell_size, start_y + (y+1.0) * cell_size),
+                                },
+                                rounding: Rounding::ZERO,
+                                fill: {
+                                    let [r, g, b, _] = palette[i].0;
+                                    Color32::from_rgb(r, g, b)
+                                },
+                                stroke: Stroke::NONE,
+                                blur_width: 0.0,
+                                fill_texture_id: TextureId::Managed(0), //these lines are from the docs and are just a fully white texture
+                                uv: Rect {
+                                    min: egui::epaint::WHITE_UV,
+                                    max: egui::epaint::WHITE_UV
+                                }
+                            };
+
+                            painter.add(rectangle);
+
+
+                            i += 1;
+                            if i >= palette.len() {
+                                break 'outer;
+                            }
+                        }
+                    }
                 }
             });
         });
