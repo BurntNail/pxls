@@ -264,18 +264,11 @@ impl PhotoBeingEdited {
     }
 }
 
-#[derive(Clone, Debug)]
-struct SettingsBuffers {
-    chunks_per_dimension: String,
-    closeness_threshold: String,
-}
-
 struct PxlsApp {
     current: PhotoBeingEdited,
     distance_algorithm: DistanceAlgorithm,
     palette_settings: PaletteSettings,
     output_settings: OutputSettings,
-    setting_change_buffers: SettingsBuffers,
     needs_to_refresh_palette: bool,
     needs_to_refresh_output: bool,
     auto_update: bool,
@@ -292,19 +285,12 @@ impl PxlsApp {
                 })
         });
 
-        let palette_settings = PaletteSettings::default();
-        let output_settings = OutputSettings::default();
-
         Self {
             current: PhotoBeingEdited::new(start_and_save_dirs),
             distance_algorithm: DistanceAlgorithm::Euclidean,
-            palette_settings,
-            output_settings,
+            palette_settings: PaletteSettings::default(),
+            output_settings: OutputSettings::default(),
             auto_update: true,
-            setting_change_buffers: SettingsBuffers {
-                chunks_per_dimension: palette_settings.chunks_per_dimension.to_string(),
-                closeness_threshold: palette_settings.closeness_threshold.to_string(),
-            },
             needs_to_refresh_output: false,
             needs_to_refresh_palette: false,
         }
@@ -419,45 +405,32 @@ impl eframe::App for PxlsApp {
                 ui.separator();
 
                 ui.vertical(|ui| {
-                    Grid::new("output_settings").show(ui, |ui| {
+                    Grid::new("settings").show(ui, |ui| {
                         {
                             ui.label("Chunks per Dimension: ");
-                            ui.text_edit_singleline(
-                                &mut self.setting_change_buffers.chunks_per_dimension,
-                            );
+                            let old_cpd = self.palette_settings.chunks_per_dimension;
+                            ui.add(Slider::new(&mut self.palette_settings.chunks_per_dimension, 1..=10_000).logarithmic(true));
 
-                            if let Ok(new_chunks_per_dimension) =
-                                self.setting_change_buffers.chunks_per_dimension.parse()
-                            {
-                                if new_chunks_per_dimension
-                                    != self.palette_settings.chunks_per_dimension
-                                {
-                                    self.needs_to_refresh_palette = true;
-                                    self.palette_settings.chunks_per_dimension =
-                                        new_chunks_per_dimension;
-                                }
+                            if self.palette_settings.chunks_per_dimension != old_cpd {
+                                self.needs_to_refresh_palette = true;
                             }
 
                             ui.end_row();
                         }
                         {
                             ui.label("Closeness Threshold: ");
-                            ui.text_edit_singleline(
-                                &mut self.setting_change_buffers.closeness_threshold,
-                            );
 
-                            if let Ok(new_closeness_threshold) =
-                                self.setting_change_buffers.closeness_threshold.parse()
-                            {
-                                if new_closeness_threshold
-                                    != self.palette_settings.closeness_threshold
-                                {
-                                    self.needs_to_refresh_palette = true;
-                                    self.palette_settings.closeness_threshold =
-                                        new_closeness_threshold;
-                                }
+                            let old_ct = self.palette_settings.closeness_threshold;
+                            ui.add(Slider::new(&mut self.palette_settings.closeness_threshold, 0..=255).logarithmic(true));
+
+                            if self.palette_settings.closeness_threshold != old_ct {
+                                self.needs_to_refresh_palette = true;
                             }
 
+                            ui.end_row();
+                        }
+                        {
+                            ui.separator();
                             ui.end_row();
                         }
                         {
@@ -511,14 +484,28 @@ impl eframe::App for PxlsApp {
                             ui.end_row();
                         }
                     });
-                })
+                });
+
+                if let RenderStage::DisplayingImage(index) = self.current.stage {
+                    ui.separator();
+                    ui.vertical(|ui| {
+                        let img = &self.current.image_history[index];
+
+                        let palette_size = img.palette.len();
+                        let input_dims = img.input.dimensions();
+                        let output_dims = img.output.dimensions();
+
+                        ui.label(format!("Palette Size: {palette_size}"));
+                        ui.label(format!("Input Dimensions: {input_dims:?}"));
+                        ui.label(format!("Output Dimensions: {output_dims:?}"));
+                    });
+                }
             });
         });
 
         if matches!(self.current.stage, RenderStage::DisplayingImage(_)) {
             egui::TopBottomPanel::new(TopBottomSide::Bottom, "bottom-panel").show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    //have to do the weird ifs for mutability reasons
 
                     let mut needs_to_reset = false;
                     if let RenderStage::DisplayingImage(index) = &mut self.current.stage {
@@ -531,7 +518,7 @@ impl eframe::App for PxlsApp {
                             0..=(self.current.image_history.len() - 1),
                         ));
 
-                        let mut changed = previous != *index;
+                        let mut needs_to_update_settings = previous != *index;
 
                         if ui.button("Clear History").clicked() {
                             self.current.image_history.clear();
@@ -549,7 +536,7 @@ impl eframe::App for PxlsApp {
                                     *index = self.current.image_history.len() - 1;
                                 }
 
-                                changed = true;
+                                needs_to_update_settings = true;
                             }
                         }
 
@@ -557,10 +544,10 @@ impl eframe::App for PxlsApp {
                             let current = self.current.image_history.swap_remove(*index);
                             self.current.image_history = vec![current];
                             *index = 0;
-                            changed = true;
+                            needs_to_update_settings = true;
                         }
 
-                        if changed {
+                        if needs_to_update_settings {
                             let (palette, output, distance) =
                                 self.current.image_history[*index].settings;
                             self.palette_settings = palette;
