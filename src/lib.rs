@@ -5,6 +5,7 @@ use std::fmt::{Display, Formatter};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
+use crate::pixel_operations::{average, better_luminance, hue, luminance, product};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum DistanceAlgorithm {
@@ -14,6 +15,7 @@ pub enum DistanceAlgorithm {
     Brightness,
     Luminance,
     SlowLuminance,
+    Hue,
 }
 
 impl DistanceAlgorithm {
@@ -25,13 +27,14 @@ impl DistanceAlgorithm {
             Self::Brightness => "Brightness",
             Self::Luminance => "Luminance",
             Self::SlowLuminance => "SlowLuminance",
+            Self::Hue => "Hue",
         }
     }
 
     pub const fn standardise_closeness_threshold(self, n: u32) -> u32 {
         match self {
             Self::Euclidean | Self::Product => n * n,
-            Self::Manhattan | Self::Brightness | Self::Luminance | Self::SlowLuminance => n,
+            Self::Manhattan | Self::Brightness | Self::Luminance | Self::SlowLuminance | Self::Hue => n,
         }
     }
 }
@@ -49,12 +52,79 @@ pub const ALL_ALGOS: &[DistanceAlgorithm] = &[
     DistanceAlgorithm::Brightness,
     DistanceAlgorithm::Luminance,
     DistanceAlgorithm::SlowLuminance,
+    DistanceAlgorithm::Hue
 ];
 
+pub mod pixel_operations {
+    use image::Rgba;
+
+    #[inline]
+    pub const fn product(
+        Rgba([r, g, b, _]): Rgba<u8>,
+    ) -> u32 {
+        r as u32 * g as u32 * b as u32
+    }
+
+    // https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color :)
+    #[inline]
+    pub const fn luminance(
+        Rgba([r, g, b, _]): Rgba<u8>,
+    ) -> u32 {
+        ((r as u32) * 1063 / 5000) + ((g as u32) * 447 / 625) + ((b as u32) * 361 / 5000)
+    }
+
+    #[inline]
+    pub const fn better_luminance(
+        Rgba([r, g, b, _]): Rgba<u8>,
+    ) -> u32 {
+        ((r as u32).pow(2) * 299 / 1000)
+            + ((g as u32).pow(2) * 587 / 1000)
+            + ((b as u32).pow(2) * 57 / 500)
+    }
+
+    #[inline]
+    pub const fn average(
+        Rgba([r, g, b, _]): Rgba<u8>,
+    ) -> u32 {
+        (r as u32 + g as u32 + b as u32) / 3
+    }
+
+    //https://stackoverflow.com/questions/23090019/fastest-formula-to-get-hue-from-rgb
+    pub fn hue (
+        Rgba([r, g, b, _]): Rgba<u8>
+    ) -> u32 {
+        let min = r.min(g).min(b);
+        let max = r.max(g).max(b);
+
+        let delta = max - min;
+
+        let (rf, gf, bf, deltaf) = (r as f32, g as f32, b as f32, delta as f32);
+
+        if min == max {
+            return 0;
+        }
+
+        let mut hue = if max == r {
+            (gf - bf) / deltaf
+        } else if max == g {
+            2.0 + (bf - rf) / deltaf
+        } else {
+            4.0 + (rf - gf) / deltaf
+        };
+
+        hue *= 60.0;
+        if hue < 0.0 {
+            hue += 360.0;
+        }
+
+        hue.round() as u32
+    }
+}
+
 impl DistanceAlgorithm {
-    pub const fn distance(self, a: Rgba<u8>, b: Rgba<u8>) -> u32 {
+    pub fn distance(self, a: Rgba<u8>, b: Rgba<u8>) -> u32 {
         #[inline]
-        const fn euclidean_distance(
+        pub const fn euclidean_distance(
             Rgba([r, g, b, _]): Rgba<u8>,
             Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
         ) -> u32 {
@@ -77,60 +147,15 @@ impl DistanceAlgorithm {
             delta_r + delta_g + delta_b
         }
 
-        #[inline]
-        const fn product_difference(
-            Rgba([r, g, b, _]): Rgba<u8>,
-            Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
-        ) -> u32 {
-            (r as u32 * g as u32 * b as u32).abs_diff(cmp_r as u32 * cmp_g as u32 * cmp_b as u32)
-        }
-
-        // https://stackoverflow.com/questions/596216/formula-to-determine-perceived-brightness-of-rgb-color :)
-        #[inline]
-        const fn luminance(
-            Rgba([r, g, b, _]): Rgba<u8>,
-            Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
-        ) -> u32 {
-            let lum_a =
-                ((r as u32) * 1063 / 5000) + ((g as u32) * 447 / 625) + ((b as u32) * 361 / 5000);
-            let lum_b = ((cmp_r as u32) * 1063 / 5000)
-                + ((cmp_g as u32) * 447 / 625)
-                + ((cmp_b as u32) * 361 / 5000);
-
-            lum_a.abs_diff(lum_b)
-        }
-
-        #[inline]
-        const fn slow_luminance(
-            Rgba([r, g, b, _]): Rgba<u8>,
-            Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
-        ) -> u32 {
-            let lum_a = ((r as u32).pow(2) * 299 / 1000)
-                + ((g as u32).pow(2) * 587 / 1000)
-                + ((b as u32).pow(2) * 57 / 500);
-            let lum_b = ((cmp_r as u32).pow(2) * 299 / 1000)
-                + ((cmp_g as u32).pow(2) * 587 / 1000)
-                + ((cmp_b as u32).pow(2) * 57 / 500);
-
-            (lum_a.isqrt()).abs_diff(lum_b.isqrt())
-        }
-
-        #[inline]
-        const fn brightness(
-            Rgba([r, g, b, _]): Rgba<u8>,
-            Rgba([cmp_r, cmp_g, cmp_b, _]): Rgba<u8>,
-        ) -> u32 {
-            (r as u32 + g as u32 + b as u32).abs_diff(cmp_r as u32 + cmp_g as u32 + cmp_b as u32)
-                / 3
-        }
 
         match self {
             Self::Euclidean => euclidean_distance(a, b),
             Self::Manhattan => manhattan_distance(a, b),
-            Self::Product => product_difference(a, b),
-            Self::Brightness => brightness(a, b),
-            Self::Luminance => luminance(a, b),
-            Self::SlowLuminance => slow_luminance(a, b),
+            Self::Product => product(a).abs_diff(product(b)),
+            Self::Brightness => average(a).abs_diff(average(b)),
+            Self::Luminance => luminance(a).abs_diff(luminance(b)),
+            Self::SlowLuminance => better_luminance(a).abs_diff(better_luminance(b)),
+            Self::Hue => hue(a).abs_diff(hue(b))
         }
     }
 }

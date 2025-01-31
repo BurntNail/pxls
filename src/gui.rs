@@ -1,4 +1,3 @@
-use std::ops::Div;
 use crate::gui::worker_thread::{start_worker_thread, ThreadRequest, ThreadResult};
 use eframe::{CreationContext, Frame, NativeOptions, Storage};
 use egui::panel::TopBottomSide;
@@ -12,6 +11,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use egui::Rounding;
 use egui::epaint::RectShape;
+use pxls::pixel_operations::{hue};
 
 mod worker_thread;
 
@@ -488,13 +488,22 @@ impl eframe::App for PxlsApp {
 
                 if let RenderStage::DisplayingImage(index) = self.current.stage {
                     let img = &self.current.image_history[index];
-                    let palette = img.palette.as_slice();
+                    let mut palette = img.palette.clone();
 
-                    let horizontal_no_colours = (palette.len() as f32).sqrt().ceil();
-                    let vertical_no_colours = (palette.len() as f32).div(horizontal_no_colours).ceil();
+                    palette.sort_by_cached_key(|px| hue(*px));
 
                     let available_rect = ui.available_rect_before_wrap();
-                    println!("AR: {available_rect:?}");
+
+                    let (horizontal_no_colours, vertical_no_colours) = {
+                        let palette_len = palette.len() as f32;
+                        let ratio = available_rect.width() / available_rect.height();
+
+                        let vertical_no_colours = (palette_len / ratio).sqrt().floor();
+                        let horizontal_no_colours = (palette_len / vertical_no_colours).ceil();
+
+                        (horizontal_no_colours, vertical_no_colours)
+                    };
+
 
                     let (cell_size, start_x, start_y) = {
                         let cell_width = available_rect.width() / horizontal_no_colours;
@@ -512,8 +521,8 @@ impl eframe::App for PxlsApp {
                     let painter = ui.painter();
 
                     //TODO: memoise, or just create an Image lol
-                    'outer: for x in 0..(horizontal_no_colours as usize) {
-                        for y in 0..(vertical_no_colours as usize) {
+                    'outer: for y in 0..(vertical_no_colours as usize) {
+                        for x in 0..(horizontal_no_colours as usize) {
                             let (x, y) = (x as f32, y as f32);
                             let rectangle = RectShape {
                                 rect: Rect {
