@@ -518,12 +518,15 @@ impl eframe::App for PxlsApp {
                             ui.end_row();
                         }
 
-
                         {
-                            let mut palette_len = match &self.current.stage {
-                                RenderStage::DisplayingImage(index) => Some(self.current.image_history[*index].palette.len()),
-                                RenderStage::CreatingOutput {palette_used, ..} => Some(palette_used.len()),
-                                _ => None
+                            let palette_len = match &self.current.stage {
+                                RenderStage::DisplayingImage(index) => {
+                                    Some(self.current.image_history[*index].palette.len())
+                                }
+                                RenderStage::CreatingOutput { palette_used, .. } => {
+                                    Some(palette_used.len())
+                                }
+                                _ => None,
                             };
                             if let Some(palette_len) = palette_len {
                                 ui.separator();
@@ -532,7 +535,6 @@ impl eframe::App for PxlsApp {
                                 ui.label("Current Palette Size:");
                                 ui.label(palette_len.to_string());
                                 ui.end_row();
-
                             }
                         }
                     });
@@ -561,7 +563,8 @@ impl eframe::App for PxlsApp {
                                     let palette_len = palette.len() as f32;
                                     let ratio = available_rect.width() / available_rect.height();
 
-                                    let vertical_no_colours = (palette_len / ratio).sqrt().floor().max(1.0);
+                                    let vertical_no_colours =
+                                        (palette_len / ratio).sqrt().floor().max(1.0);
                                     let horizontal_no_colours =
                                         (palette_len / vertical_no_colours).ceil();
 
@@ -572,13 +575,15 @@ impl eframe::App for PxlsApp {
                                     (horizontal_no_colours as usize, vertical_no_colours as usize);
 
                                 let mut palette_index = 0;
-                                let mut color_image = ColorImage::new([image_width, image_height], Color32::TRANSPARENT);
+                                let mut color_image = ColorImage::new(
+                                    [image_width, image_height],
+                                    Color32::TRANSPARENT,
+                                );
 
                                 'outer: for row in 0..image_height {
                                     for column in 0..image_width {
                                         let [r, g, b] = palette[palette_index].to_rgb().0;
-                                        color_image[(column, row)] =
-                                            Color32::from_rgb(r, g, b);
+                                        color_image[(column, row)] = Color32::from_rgb(r, g, b);
 
                                         palette_index += 1;
                                         if palette_index >= palette.len() {
@@ -596,7 +601,7 @@ impl eframe::App for PxlsApp {
 
                                 //yes i could chuck some unsafe in here, but if LLVM doesn't catch this one i'll be VERY surprised
                                 self.show_palette = Some(RenderedPalette {
-                                    input: (palette.clone(), available_rect),
+                                    input: (palette, available_rect),
                                     dimensions,
                                     handle,
                                 });
