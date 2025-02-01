@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use pxls::pixel_operations::hue;
+use pxls::pixel_operations::rgb_to_hsv;
 
 pub enum ThreadRequest {
     GetInputImage,
@@ -118,7 +118,7 @@ pub fn start_worker_thread(
                             should_stop.clone(),
                         );
 
-                        palette.sort_by_cached_key(|x| hue(*x));
+                        palette.sort_by_cached_key(|x| rgb_to_hsv(*x)[0]);
 
                         res_tx
                             .send(ThreadResult::RenderedPalette {
