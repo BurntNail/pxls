@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
+use pxls::pixel_operations::hue;
 
 pub enum ThreadRequest {
     GetInputImage,
@@ -21,7 +22,7 @@ pub enum ThreadRequest {
     },
     RenderOutput {
         input: Arc<DynamicImage>,
-        palette: Vec<Rgba<u8>>,
+        palette: Arc<[Rgba<u8>]>,
         palette_settings: PaletteSettings,
         output_settings: OutputSettings,
         distance_algorithm: DistanceAlgorithm,
@@ -38,12 +39,12 @@ pub enum ThreadResult {
     },
     RenderedPalette {
         input: Arc<DynamicImage>,
-        palette: Vec<Rgba<u8>>,
+        palette: Arc<[Rgba<u8>]>,
         palette_settings: PaletteSettings,
     },
     RenderedImage {
         input: Arc<DynamicImage>,
-        palette: Vec<Rgba<u8>>,
+        palette: Arc<[Rgba<u8>]>,
         output: DynamicImage,
         settings: (PaletteSettings, OutputSettings, DistanceAlgorithm),
     },
@@ -109,7 +110,7 @@ pub fn start_worker_thread(
                         distance_algorithm,
                         progress_tx,
                     } => {
-                        let palette = get_palette(
+                        let mut palette = get_palette(
                             &input,
                             palette_settings,
                             distance_algorithm,
@@ -117,10 +118,12 @@ pub fn start_worker_thread(
                             should_stop.clone(),
                         );
 
+                        palette.sort_by_cached_key(|x| hue(*x));
+
                         res_tx
                             .send(ThreadResult::RenderedPalette {
                                 input,
-                                palette,
+                                palette: palette.into(),
                                 palette_settings,
                             })
                             .unwrap();

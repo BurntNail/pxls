@@ -1,17 +1,14 @@
 use crate::gui::worker_thread::{start_worker_thread, ThreadRequest, ThreadResult};
 use eframe::{CreationContext, Frame, NativeOptions, Storage};
 use egui::panel::TopBottomSide;
-use egui::{pos2, Color32, ColorImage, Context, Grid, ProgressBar, Rect, Slider, Stroke, TextureHandle, TextureId, TextureOptions, Widget};
-use image::{DynamicImage, GenericImageView, Pixel, Rgba};
+use egui::{pos2, Color32, ColorImage, Context, Grid, ProgressBar, Rect, Sense, Slider, TextureHandle, TextureId, TextureOptions, Widget};
+use image::{ColorType, DynamicImage, GenericImage, GenericImageView, Pixel, Rgba};
 use pxls::{pixel_perfect_scale, DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use egui::Rounding;
-use egui::epaint::RectShape;
-use pxls::pixel_operations::{hue};
 
 mod worker_thread;
 
@@ -34,6 +31,7 @@ enum RenderStage {
         progress_rx: Receiver<(u32, u32)>,
     },
     CreatingOutput {
+        palette_used: Arc<[Rgba<u8>]>,
         last_progress: (u32, u32),
         progress_rx: Receiver<(u32, u32)>,
     },
@@ -43,10 +41,16 @@ enum RenderStage {
 #[derive(Clone)]
 struct RenderedImage {
     input: Arc<DynamicImage>,
-    palette: Vec<Rgba<u8>>,
+    palette: Arc<[Rgba<u8>]>,
     output: DynamicImage,
     handle: TextureHandle,
     settings: (PaletteSettings, OutputSettings, DistanceAlgorithm),
+}
+
+struct RenderedPalette {
+    input: (Arc<[Rgba<u8>]>, Rect),
+    image: DynamicImage,
+    handle: TextureHandle,
 }
 
 struct PhotoBeingEdited {
@@ -120,6 +124,7 @@ impl PhotoBeingEdited {
                 } => {
                     let (progress_tx, progress_rx) = channel();
                     self.stage = RenderStage::CreatingOutput {
+                        palette_used: palette.clone(),
                         progress_rx,
                         last_progress: (0, 1),
                     };
@@ -176,6 +181,7 @@ impl PhotoBeingEdited {
 
         match &mut self.stage {
             RenderStage::CreatingOutput {
+                palette_used: _,
                 last_progress,
                 progress_rx,
             }
@@ -241,6 +247,7 @@ impl PhotoBeingEdited {
                 .unwrap();
 
             self.stage = RenderStage::CreatingOutput {
+                palette_used: ri.palette.clone(),
                 progress_rx,
                 last_progress: (0, 1),
             }
@@ -266,6 +273,7 @@ impl PhotoBeingEdited {
 
 struct PxlsApp {
     current: PhotoBeingEdited,
+    show_palette: Option<RenderedPalette>,
     distance_algorithm: DistanceAlgorithm,
     palette_settings: PaletteSettings,
     output_settings: OutputSettings,
@@ -287,6 +295,7 @@ impl PxlsApp {
 
         Self {
             current: PhotoBeingEdited::new(start_and_save_dirs),
+            show_palette: None,
             distance_algorithm: DistanceAlgorithm::Euclidean,
             palette_settings: PaletteSettings::default(),
             output_settings: OutputSettings::default(),
@@ -483,75 +492,106 @@ impl eframe::App for PxlsApp {
 
                             ui.end_row();
                         }
+                        if let RenderStage::DisplayingImage(index) = self.current.stage {
+                            ui.separator();
+                            ui.end_row();
+
+                            let palette_len = self.current.image_history[index].palette.len();
+                            ui.label("Current Palette Size:");
+                            ui.label(palette_len.to_string());
+                            ui.end_row();
+                        }
                     });
                 });
 
-                if let RenderStage::DisplayingImage(index) = self.current.stage {
-                    let img = &self.current.image_history[index];
-                    let mut palette = img.palette.clone();
 
-                    palette.sort_by_cached_key(|px| hue(*px));
-
+                let palette: Option<Arc<[Rgba<u8>]>> = match &self.current.stage {
+                    RenderStage::DisplayingImage(index) => Some(self.current.image_history[*index].palette.clone()),
+                    RenderStage::CreatingOutput {palette_used, ..} => Some(palette_used.clone()),
+                    _ => None
+                };
+                if let Some(palette) = palette {
                     let available_rect = ui.available_rect_before_wrap();
 
-                    let (horizontal_no_colours, vertical_no_colours) = {
-                        let palette_len = palette.len() as f32;
-                        let ratio = available_rect.width() / available_rect.height();
+                    let palette_to_show = {
+                        match self.show_palette.as_ref() {
+                            Some(sp) if Arc::ptr_eq(&sp.input.0, &palette) && sp.input.1 == available_rect => sp,
+                            _ => {
+                                let (horizontal_no_colours, vertical_no_colours) = {
+                                    let palette_len = palette.len() as f32;
+                                    let ratio = available_rect.width() / available_rect.height();
 
-                        let vertical_no_colours = (palette_len / ratio).sqrt().floor();
-                        let horizontal_no_colours = (palette_len / vertical_no_colours).ceil();
+                                    let vertical_no_colours = (palette_len / ratio).sqrt().floor();
+                                    let horizontal_no_colours = (palette_len / vertical_no_colours).ceil();
 
-                        (horizontal_no_colours, vertical_no_colours)
+                                    (horizontal_no_colours, vertical_no_colours)
+                                };
+                                #[allow(clippy::cast_sign_loss)]
+                                let (image_width, image_height) = (horizontal_no_colours as u32, vertical_no_colours as u32);
+
+                                let mut palette_index = 0;
+                                let mut image = DynamicImage::new(image_width, image_height, ColorType::Rgb8);
+
+                                'outer: for row in 0..image_height {
+                                    for column in 0..image_width {
+                                        image.put_pixel(column, row, palette[palette_index].to_rgba());
+
+                                        palette_index += 1;
+                                        if palette_index >= palette.len() {
+                                            break 'outer;
+                                        }
+                                    }
+                                }
+
+                                let handle = ctx.load_texture(
+                                    "my-palette",
+                                    PhotoBeingEdited::color_image_from_dynamic_image(&image),
+                                    self.current.texture_options,
+                                );
+
+                                self.show_palette = Some(RenderedPalette {
+                                    input: (palette.clone(), available_rect),
+                                    image,
+                                    handle,
+                                });
+                                //yes i could chuck some unsafe in here, but if LLVM doesn't catch this one i'll be VERY surprised
+                                self.show_palette.as_ref().unwrap()
+                            }
+                        }
                     };
 
+                    let _ = ui.allocate_rect(available_rect, Sense::hover()); //allocate to ensure we don't draw anything on top :)
+                    let painter = ui.painter();
 
-                    let (cell_size, start_x, start_y) = {
+                    let display_rect = {
+                        let (horizontal_no_colours, vertical_no_colours) = ((palette_to_show.image.width() as f32), (palette_to_show.image.height() as f32));
+
                         let cell_width = available_rect.width() / horizontal_no_colours;
                         let cell_height = available_rect.height() / vertical_no_colours;
 
                         let cell_size = cell_width.min(cell_height);
 
-                        let start_x = (available_rect.width() - cell_size * horizontal_no_colours) / 2.0;
-                        let start_y = (available_rect.height() - cell_size * vertical_no_colours) / 2.0;
+                        //mul by horizontal_no_colours to get the width taken up by the palette, then subtract that from the available width to get the buffer, then div by 2 to get the left buffer space
+                        let start_x = available_rect.min.x + cell_size.mul_add(-horizontal_no_colours, available_rect.width()) / 2.0;
+                        let start_y = available_rect.min.y + cell_size.mul_add(-vertical_no_colours, available_rect.height()) / 2.0;
 
-                        (cell_size, available_rect.min.x + start_x, available_rect.min.y + start_y)
+                        Rect {
+                            min: pos2(start_x, start_y),
+                            max: pos2(horizontal_no_colours.mul_add(cell_size, start_x), vertical_no_colours.mul_add(cell_size, start_y))
+                        }
                     };
 
-                    let mut i = 0;
-                    let painter = ui.painter();
+                    let texid = TextureId::from(&palette_to_show.handle);
 
-                    //TODO: memoise, or just create an Image lol
-                    'outer: for y in 0..(vertical_no_colours as usize) {
-                        for x in 0..(horizontal_no_colours as usize) {
-                            let (x, y) = (x as f32, y as f32);
-                            let rectangle = RectShape {
-                                rect: Rect {
-                                    min: pos2(start_x + x * cell_size, start_y + y * cell_size),
-                                    max: pos2(start_x + (x+1.0) * cell_size, start_y + (y+1.0) * cell_size),
-                                },
-                                rounding: Rounding::ZERO,
-                                fill: {
-                                    let [r, g, b, _] = palette[i].0;
-                                    Color32::from_rgb(r, g, b)
-                                },
-                                stroke: Stroke::NONE,
-                                blur_width: 0.0,
-                                fill_texture_id: TextureId::Managed(0), //these lines are from the docs and are just a fully white texture
-                                uv: Rect {
-                                    min: egui::epaint::WHITE_UV,
-                                    max: egui::epaint::WHITE_UV
-                                }
-                            };
-
-                            painter.add(rectangle);
-
-
-                            i += 1;
-                            if i >= palette.len() {
-                                break 'outer;
-                            }
-                        }
-                    }
+                    painter.image(
+                        texid,
+                        display_rect,
+                        Rect {
+                            min: pos2(0.0, 0.0),
+                            max: pos2(1.0, 1.0)
+                        },
+                        Color32::WHITE
+                    );
                 }
             });
         });
