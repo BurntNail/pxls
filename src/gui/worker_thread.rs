@@ -1,4 +1,5 @@
 use image::{DynamicImage, ImageReader, Rgba};
+use pxls::pixel_operations::rgb_to_hsv;
 use pxls::{
     dither_original_with_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings,
 };
@@ -9,7 +10,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use pxls::pixel_operations::rgb_to_hsv;
 
 pub enum ThreadRequest {
     GetInputImage,
