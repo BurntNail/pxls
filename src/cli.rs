@@ -1,17 +1,16 @@
 use anyhow::anyhow;
-use dialoguer::theme::ColorfulTheme;
-use dialoguer::{FuzzySelect, Input};
+use dialoguer::{theme::ColorfulTheme, FuzzySelect, Input};
 use image::ImageReader;
 use pxls::{
     dither_original_with_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings,
     ALL_ALGOS,
 };
-use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::channel;
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    fs,
+    path::PathBuf,
+    sync::{atomic::AtomicBool, mpsc::channel, Arc},
+};
 
 #[allow(dead_code)]
 pub fn cli_main(should_ask: bool) -> anyhow::Result<()> {

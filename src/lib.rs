@@ -1,11 +1,14 @@
 use crate::pixel_operations::{luminance, rgb_to_hsv};
 use image::{ColorType, DynamicImage, GenericImage, GenericImageView, Pixel, Rgba};
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
-use std::sync::Arc;
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    fmt::{Display, Formatter},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::Sender,
+        Arc,
+    },
+};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum DistanceAlgorithm {

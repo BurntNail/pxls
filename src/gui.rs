@@ -1,17 +1,20 @@
 use crate::gui::worker_thread::{start_worker_thread, ThreadRequest, ThreadResult};
 use eframe::{CreationContext, Frame, NativeOptions, Storage};
-use egui::panel::TopBottomSide;
 use egui::{
-    pos2, Color32, ColorImage, Context, Grid, ProgressBar, Rect, Sense, Slider, TextureHandle,
-    TextureId, TextureOptions, Widget,
+    panel::TopBottomSide, pos2, Color32, ColorImage, Context, Grid, ProgressBar, Rect, Sense,
+    Slider, TextureHandle, TextureId, TextureOptions, Widget,
 };
 use image::{DynamicImage, GenericImageView, Pixel, Rgba};
 use pxls::{pixel_perfect_scale, DistanceAlgorithm, OutputSettings, PaletteSettings, ALL_ALGOS};
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
-use std::thread::JoinHandle;
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{channel, Receiver, Sender},
+        Arc,
+    },
+    thread::JoinHandle,
+};
 
 mod worker_thread;
 

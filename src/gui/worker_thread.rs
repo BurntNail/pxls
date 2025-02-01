@@ -1,15 +1,19 @@
 use image::{DynamicImage, ImageReader, Rgba};
-use pxls::pixel_operations::rgb_to_hsv;
 use pxls::{
-    dither_original_with_palette, get_palette, DistanceAlgorithm, OutputSettings, PaletteSettings,
+    dither_original_with_palette, get_palette, pixel_operations::rgb_to_hsv, DistanceAlgorithm,
+    OutputSettings, PaletteSettings,
 };
 use rfd::FileDialog;
-use std::env::current_dir;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
-use std::thread::JoinHandle;
+use std::{
+    env::current_dir,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{channel, Receiver, Sender},
+        Arc,
+    },
+    thread::JoinHandle,
+};
 
 pub enum ThreadRequest {
     GetInputImage,

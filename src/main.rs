@@ -6,8 +6,7 @@
     clippy::cast_precision_loss
 )]
 
-use crate::cli::cli_main;
-use crate::gui::gui_main;
+use crate::{cli::cli_main, gui::gui_main};
 use std::env::args;
 
 mod cli;
