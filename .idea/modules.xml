@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/image_quantiser.iml" filepath="$PROJECT_DIR$/.idea/image_quantiser.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/pxls.iml" filepath="$PROJECT_DIR$/.idea/pxls.iml" />
     </modules>
   </component>
 </project>
