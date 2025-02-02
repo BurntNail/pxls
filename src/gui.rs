@@ -1,7 +1,7 @@
 use crate::gui::worker_thread::{start_worker_thread, ThreadRequest, ThreadResult};
 use eframe::{CreationContext, Frame, NativeOptions, Storage};
 use egui::{
-    panel::TopBottomSide, pos2, Color32, ColorImage, Context, Grid, ProgressBar, Rect, Sense,
+    panel::TopBottomSide, pos2, vec2, Color32, ColorImage, Context, Grid, ProgressBar, Rect, Sense,
     Slider, TextureHandle, TextureId, TextureOptions, Widget,
 };
 use image::{DynamicImage, GenericImageView, Pixel, Rgba};
@@ -68,6 +68,18 @@ struct PhotoBeingEdited {
     results_rx: Receiver<ThreadResult>,
     texture_options: TextureOptions,
     image_history: Vec<RenderedImage>,
+}
+
+struct PxlsApp {
+    current: PhotoBeingEdited,
+    //this is in the App rather than the PhotoBeingEdited because it's more of a UI element than anything else
+    show_palette: Option<RenderedPalette>,
+    distance_algorithm: DistanceAlgorithm,
+    palette_settings: PaletteSettings,
+    output_settings: OutputSettings,
+    needs_to_refresh_palette: bool,
+    needs_to_refresh_output: bool,
+    auto_update: bool,
 }
 
 impl PhotoBeingEdited {
@@ -285,17 +297,6 @@ impl PhotoBeingEdited {
             }
         }
     }
-}
-
-struct PxlsApp {
-    current: PhotoBeingEdited,
-    show_palette: Option<RenderedPalette>,
-    distance_algorithm: DistanceAlgorithm,
-    palette_settings: PaletteSettings,
-    output_settings: OutputSettings,
-    needs_to_refresh_palette: bool,
-    needs_to_refresh_output: bool,
-    auto_update: bool,
 }
 
 impl PxlsApp {
@@ -613,10 +614,9 @@ impl eframe::App for PxlsApp {
                         }
                     };
 
-                    let _ = ui.allocate_rect(available_rect, Sense::hover()); //allocate to ensure we don't draw anything on top :)
                     let painter = ui.painter();
 
-                    let display_rect = {
+                    let (display_rect, cell_size) = {
                         let (horizontal_no_colours, vertical_no_colours) = (
                             (palette_to_show.dimensions[0] as f32),
                             (palette_to_show.dimensions[1] as f32),
@@ -635,13 +635,14 @@ impl eframe::App for PxlsApp {
                             + cell_size.mul_add(-vertical_no_colours, available_rect.height())
                                 / 2.0;
 
-                        Rect {
-                            min: pos2(start_x, start_y),
-                            max: pos2(
-                                horizontal_no_colours.mul_add(cell_size, start_x),
-                                vertical_no_colours.mul_add(cell_size, start_y),
-                            ),
-                        }
+                        let min = pos2(start_x, start_y);
+                        let max = min
+                            + vec2(
+                                horizontal_no_colours * cell_size,
+                                vertical_no_colours * cell_size,
+                            );
+
+                        (Rect { min, max }, cell_size)
                     };
 
                     let texid = TextureId::from(&palette_to_show.handle);
@@ -655,6 +656,30 @@ impl eframe::App for PxlsApp {
                         },
                         Color32::WHITE,
                     );
+
+                    let mut palette_index = 0;
+                    'outer: for row in 0..palette_to_show.dimensions[1] {
+                        for col in 0..palette_to_show.dimensions[0] {
+                            let (x_index, y_index) = (col as f32, row as f32);
+                            let min =
+                                display_rect.min + vec2(x_index * cell_size, y_index * cell_size);
+                            let max = min + vec2(cell_size, cell_size);
+                            let [r, g, b, _] = palette_to_show.input.0[palette_index].0;
+
+                            let rsp = ui.allocate_rect(Rect { min, max }, Sense::click());
+                            if rsp.clicked() {
+                                ui.ctx().copy_text(format!("#{r:02X}{g:02X}{b:02X}"));
+                            }
+                            rsp.on_hover_ui(|ui| {
+                                ui.label(format!("Click to Copy: #{r:02X}{g:02X}{b:02X}"));
+                            });
+
+                            palette_index += 1;
+                            if palette_index >= palette_to_show.input.0.len() {
+                                break 'outer;
+                            }
+                        }
+                    }
                 }
             });
         });
